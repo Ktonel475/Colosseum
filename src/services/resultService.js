@@ -2,17 +2,24 @@ import prisma from '../database/prisma.js';
 import config from '../config/index.js';
 import logger from '../utils/logger.js';
 import { ValidationError, ConflictError, NotFoundError, AppError } from '../utils/errors.js';
+import { t } from '../utils/i18n.js';
 import { recordAudit } from './auditService.js';
 
 const INTEGER = /^\d+$/;
 
 export function parseScore(value) {
   if (typeof value === 'number') {
-    if (!Number.isInteger(value) || value < 0) throw new ValidationError('Scores must be non-negative integers');
+    if (!Number.isInteger(value) || value < 0) {
+      throw new ValidationError('Scores must be non-negative integers', undefined, {
+        i18nKey: 'errors.scores_invalid',
+      });
+    }
     return value;
   }
   if (typeof value !== 'string' || !INTEGER.test(value.trim())) {
-    throw new ValidationError('Scores must be non-negative integers');
+    throw new ValidationError('Scores must be non-negative integers', undefined, {
+      i18nKey: 'errors.scores_invalid',
+    });
   }
   return Number(value.trim());
 }

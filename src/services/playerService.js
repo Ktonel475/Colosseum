@@ -39,7 +39,11 @@ export async function initializePlayer({
   client = prisma,
 }) {
   const username = String(discordUsername ?? '').trim();
-  if (!username) throw new ValidationError('A username is required');
+  if (!username) {
+    throw new ValidationError('A username is required', undefined, {
+      i18nKey: 'errors.username_required',
+    });
+  }
 
   const existing = await client.players.findUnique({ where: { discord_user_id: discordUserId } });
   const player = await client.players.upsert({
@@ -102,7 +106,9 @@ export async function assignTeam({
 }) {
   const team = await prisma.teams.findUnique({ where: { team_id: teamId } });
   if (!team || !team.is_active) {
-    throw new ValidationError('Selected team is not active');
+    throw new ValidationError('Selected team is not active', undefined, {
+      i18nKey: 'errors.team_inactive',
+    });
   }
 
   const existing = await prisma.players.findUnique({
@@ -139,6 +145,8 @@ export async function assignTeam({
       logger.error({ err, discordUserId, teamId }, 'Failed to add team role');
       throw new ValidationError(
         'Could not assign the Discord role. No changes were saved. Please try again later.',
+        undefined,
+        { i18nKey: 'errors.role_assign_failed' },
       );
     }
   }

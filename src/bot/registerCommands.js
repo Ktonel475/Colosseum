@@ -168,14 +168,42 @@ export const commandDefinitions = config.devCommands
   ? [...baseCommandDefinitions, ...devCommandDefinitions]
   : baseCommandDefinitions;
 
-export async function registerCommands(client) {
-  const guildId = process.env.DISCORD_SERVER_ID;
+/**
+ * Register the slash commands without requiring a pre-configured guild id.
+ *
+ * - With an explicit `guildId`, only that guild is updated (used when the bot
+ *   joins a new server).
+ * - Otherwise every guild the bot is currently in is updated, so commands are
+ *   available instantly without `DISCORD_SERVER_ID`.
+ * - If the bot is not in any guild yet, fall back to global registration.
+ */
+export async function registerCommands(client, guildId) {
   const body = commandDefinitions.map((c) => c.toJSON());
+
   if (guildId) {
     const guild = await client.guilds.fetch(guildId);
     await guild.commands.set(body);
-    return { scope: 'guild', count: body.length };
+    return { scope: 'guild', guildId: guild.id, count: body.length };
   }
-  await client.application.commands.set(body);
-  return { scope: 'global', count: body.length };
+
+  const guilds = [...client.guilds.cache.values()];
+  if (!guilds.length) {
+    await client.application.commands.set(body);
+    return { scope: 'global', count: body.length };
+  }
+
+  const results = await Promise.allSettled(guilds.map((guild) => guild.commands.set(body)));
+  const registered = guilds
+    .filter((_, index) => results[index].status === 'fulfilled')
+    .map((guild) => guild.id);
+  const failed = results
+    .filter((result) => result.status === 'rejected')
+    .map((result) => result.reason?.message ?? String(result.reason));
+
+  return {
+    scope: 'guilds',
+    guilds: registered,
+    count: body.length,
+    ...(failed.length ? { failed } : {}),
+  };
 }

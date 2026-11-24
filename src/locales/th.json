@@ -44,5 +44,29 @@
   "match.cancel_notice": "ยกเลิกผลการแข่งขันแล้ว ไม่มีการเปลี่ยนแปลงใด ๆ",
   "match.generic_error": "เกิดข้อผิดพลาด: {error}",
   "match.invalid_winner": "การเลือกผู้ชนะไม่ถูกต้อง",
-  "match.missing_team": "ไม่พบผู้ใช้ของทีม"
+  "match.missing_team": "ไม่พบผู้ใช้ของทีม",
+  "errors.invalid_team_row": "รายการทีมไม่ถูกต้อง",
+  "errors.team_name_conflict": "ชื่อทีมซ้ำ",
+  "errors.invalid_team_input": "ข้อมูลทีมไม่ถูกต้อง",
+  "errors.team_exists": "มีทีมรหัสนี้หรือชื่อนี้แล้ว",
+  "errors.multiple_teams_named": "มีทีมชื่อ {name} ทั้งหมด {codes} รหัส",
+  "errors.team_not_found": "ไม่พบทีม",
+  "errors.guild_required": "ต้องมีDiscord กระเป๋าเงิน",
+  "errors.username_required": "ชื่อผู้ใช้จำเป็น",
+  "errors.team_inactive": "เลือกทีมไม่ได้ เนื่องจากทีมไม่active",
+  "errors.role_assign_failed": "ไม่สามารถกำหนดส่วนแดรลล์ Discord ได้",
+  "errors.scores_invalid": "คะแนนต้องเป็นจำนวนเต็มไม่ติดลบ",
+  "errors.match_not_found": "ไม่พบแมตช์",
+  "errors.teams_not_found": "ทีมหนึ่งหรือสองทีมไม่พบ",
+  "errors.teams_inactive": "ทีมทั้งสองต้องactive",
+  "errors.self_match": "ทีมไม่สามารถเล่นกับตัวเองได้",
+  "errors.match_exists": "มีแมตช์ระหว่างทีมคู่นี้แล้ว",
+  "errors.thread_create_failed": "สร้างเธรดส่วนตัวล้มเหลว",
+  "common.unexpected_error": "เกิดข้อผิดพลาดไม่คาดคิด",
+  "common.permission_denied": "คุณไม่มีสิทธิ์",
+  "common.command_unknown": "คำสั่งไม่รู้จัก",
+  "match_legacy": {
+    "thread_intro": "${team1Ping} ${team2Ping}\n\n**Match created**\n• **Team 1:** {team1} ({team1Id})\n• **Team 2:** {team2} ({team2Id})\n\nส่งคะแนนจากเธรดนี้โดยใช้:\n`/result score1:<分数 Team 1> score2:<分数 Team 2>`\n\nผู้เล่นที่ลงทะเบียนจากแต่ละทีมต้องยืนยันผลที่ส่งไปแล้ว ผู้เข้าร่วมและทีมงานเท่านั้นจึงจะมองเห็นเธรดนี้"
+  },
+  "match_legacy_thread_intro": "${team1Ping} ${team2Ping}\n\n**Match created**\n• **Team 1:** {team1} ({team1Id})\n• **Team 2:** {team2} ({team2Id})\n\nส่งคะแนนจากเธรดนี้โดยใช้:\n`/result score1:<分数 Team 1> score2:<分数 Team 2>`\n\nผู้เล่นที่ลงทะเบียนจากแต่ละทีมต้องยืนยันผลที่ส่งไปแล้ว ผู้เข้าร่วมและทีมงานเท่านั้นจึงจะมองเห็นเธรดนี้"
 }

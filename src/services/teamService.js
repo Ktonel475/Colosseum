@@ -96,7 +96,9 @@ export async function applyImport(rows, { actorDiscordId = 'system', skipNames =
       if (skipNames.includes(row.team_name)) continue;
       const probe = TeamInput.safeParse(row);
       if (!probe.success) {
-        throw new ValidationError(`Invalid team row: ${JSON.stringify(row)}`);
+        throw new ValidationError(`Invalid team row: ${JSON.stringify(row)}`, undefined, {
+          i18nKey: 'errors.invalid_team_row',
+        });
       }
       const gameType = normalizeGameType(row.game_type);
       const match = byId.get(row.team_id.toLowerCase());
@@ -107,6 +109,14 @@ export async function applyImport(rows, { actorDiscordId = 'system', skipNames =
           throw new ConflictError(
             `Team name '${row.team_name}' already belongs to team ${nameClash.team_id} ` +
               `in ${describeCategory(gameType)}`,
+            {
+              i18nKey: 'errors.team_name_conflict',
+              i18nParams: {
+                team: row.team_name,
+                code: nameClash.team_id,
+                category: describeCategory(gameType),
+              },
+            },
           );
         }
         const team = await tx.teams.create({
@@ -131,6 +141,14 @@ export async function applyImport(rows, { actorDiscordId = 'system', skipNames =
           throw new ConflictError(
             `Team name '${row.team_name}' already belongs to team ${clash.team_id} ` +
               `in ${describeCategory(nextGameType)}`,
+            {
+              i18nKey: 'errors.team_name_conflict',
+              i18nParams: {
+                team: row.team_name,
+                code: clash.team_id,
+                category: describeCategory(nextGameType),
+              },
+            },
           );
         }
         const team = await tx.teams.update({
@@ -179,7 +197,9 @@ export async function applyImport(rows, { actorDiscordId = 'system', skipNames =
 export async function addTeam({ team_id, team_name, game_type }, actorDiscordId = 'system') {
   const parsed = TeamInput.safeParse({ team_id, team_name, game_type });
   if (!parsed.success) {
-    throw new ValidationError(parsed.error.issues[0].message);
+    throw new ValidationError(parsed.error.issues[0].message, undefined, {
+      i18nKey: 'errors.invalid_team_input',
+    });
   }
 
   const normalizedGame = normalizeGameType(parsed.data.game_type);
@@ -194,6 +214,7 @@ export async function addTeam({ team_id, team_name, game_type }, actorDiscordId 
   if (existing) {
     throw new ConflictError(
       'A team with that code, or that name in the same game type, already exists',
+      { i18nKey: 'errors.team_exists' },
     );
   }
 
@@ -229,11 +250,19 @@ export async function deactivateTeam(identifier, actorDiscordId = 'system') {
       throw new ValidationError(
         `Multiple teams are named '${identifier}' (${matches.map((t) => t.team_id).join(', ')}). ` +
           'Use the team code (รหัสทีม) instead.',
+        undefined,
+        {
+          i18nKey: 'errors.multiple_teams_named',
+          i18nParams: {
+            name: identifier,
+            codes: matches.map((t) => t.team_id).join(', '),
+          },
+        },
       );
     }
     team = matches[0] ?? null;
   }
-  if (!team) throw new NotFoundError('Team not found');
+  if (!team) throw new NotFoundError('Team not found', { i18nKey: 'errors.team_not_found' });
   if (!team.is_active) return team;
 
   const updated = await prisma.teams.update({
@@ -263,7 +292,7 @@ export async function listTeams({ includeInactive = false, search, gameType } = 
 
 export async function getTeam(identifier) {
   if (identifier === undefined || identifier === null || identifier === '') {
-    throw new NotFoundError('Team not found');
+    throw new NotFoundError('Team not found', { i18nKey: 'errors.team_not_found' });
   }
   const team = await prisma.teams.findUnique({
     where: { team_id: String(identifier) },
@@ -279,10 +308,18 @@ export async function getTeam(identifier) {
     throw new ValidationError(
       `Multiple teams are named '${identifier}' (${matches.map((t) => t.team_id).join(', ')}). ` +
         'Use the team code (รหัสทีม) instead.',
+      undefined,
+      {
+        i18nKey: 'errors.multiple_teams_named',
+        i18nParams: {
+          name: identifier,
+          codes: matches.map((t) => t.team_id).join(', '),
+        },
+      },
     );
   }
   if (matches.length === 1) return matches[0];
-  throw new NotFoundError('Team not found');
+  throw new NotFoundError('Team not found', { i18nKey: 'errors.team_not_found' });
 }
 
 /**
@@ -303,7 +340,11 @@ export async function resolveTeamRoleName(team) {
  * `guild` is a discord.js Guild. Returns a per-team result summary.
  */
 export async function syncTeamRoles(guild, actorDiscordId = 'system') {
-  if (!guild) throw new ValidationError('A Discord guild is required for role sync');
+  if (!guild) {
+    throw new ValidationError('A Discord guild is required for role sync', undefined, {
+      i18nKey: 'errors.guild_required',
+    });
+  }
   const teams = await prisma.teams.findMany({ where: { is_active: true } });
   const results = [];
 

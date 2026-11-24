@@ -44,5 +44,29 @@
   "match.cancel_notice": "Result cancelled. Nothing was changed.",
   "match.generic_error": "Something went wrong: {error}",
   "match.invalid_winner": "Invalid winner selection.",
-  "match.missing_team": "A team user is missing."
+  "match.missing_team": "A team user is missing.",
+  "errors.invalid_team_row": "Invalid team row",
+  "errors.team_name_conflict": "Team name conflict",
+  "errors.invalid_team_input": "Invalid team input",
+  "errors.team_exists": "A team with that code or name already exists",
+  "errors.multiple_teams_named": "Multiple teams named {name} (codes: {codes})",
+  "errors.team_not_found": "Team not found",
+  "errors.guild_required": "A Discord guild is required",
+  "errors.username_required": "A username is required",
+  "errors.team_inactive": "Selected team is not active",
+  "errors.role_assign_failed": "Could not assign the Discord role",
+  "errors.scores_invalid": "Scores must be non-negative integers",
+  "errors.match_not_found": "Match not found",
+  "errors.teams_not_found": "One or both teams not found",
+  "errors.teams_inactive": "Both teams must be active",
+  "errors.self_match": "A team cannot play against itself",
+  "errors.match_exists": "An active match between these teams already exists",
+  "errors.thread_create_failed": "Failed to create the private match thread",
+  "common.unexpected_error": "Unexpected error",
+  "common.permission_denied": "You do not have permission",
+  "common.command_unknown": "Unknown command",
+  "match_legacy": {
+    "thread_intro": "${team1Ping} ${team2Ping}\n\n**Match created**\n• **Team 1:** {team1} ({team1Id})\n• **Team 2:** {team2} ({team2Id})\n\nSubmit the score from this thread with:\n`/result score1:<Team 1 score> score2:<Team 2 score>`\n\nA registered player from each team must then confirm the submitted result. Only participants and staff can see this thread."
+  },
+  "match_legacy_thread_intro": "${team1Ping} ${team2Ping}\n\n**Match created**\n• **Team 1:** {team1} ({team1Id})\n• **Team 2:** {team2} ({team2Id})\n\nSubmit the score from this thread with:\n`/result score1:<Team 1 score> score2:<Team 2 score>`\n\nA registered player from each team must then confirm the submitted result. Only participants and staff can see this thread."
 }

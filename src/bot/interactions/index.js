@@ -47,7 +47,10 @@ export function isStaff(interaction) {
 }
 
 function getGuild(interaction, client) {
-  return interaction.guild ?? client.guilds.cache.get(config.discord.guildId) ?? null;
+  // Prefer the guild the interaction happened in; for DMs fall back to the
+  // first guild the bot has joined (the server id is discovered at runtime,
+  // no DISCORD_SERVER_ID configuration required).
+  return interaction.guild ?? client.guilds.cache.first() ?? null;
 }
 
 async function resolveMember(interaction, client) {
@@ -593,6 +596,24 @@ async function handleInit(interaction) {
   const target = interaction.options.getUser('target', true);
   const guild = getGuild(interaction, interaction.client);
   const member = guild ? await guild.members.fetch(target.id).catch(() => null) : null;
+
+  if (config.match.moduleOnly) {
+    // In module-only mode, reset the player state but skip the automatic
+    // newcomer welcome DM. The member can still use /regist or /repick-team.
+    const result = await playerService.initializePlayer({
+      discordUserId: target.id,
+      discordUsername: target.username,
+      actorDiscordId: interaction.user.id,
+    });
+    return interaction.editReply({
+      content:
+        `Initialized <@${result.player.discord_user_id}> (**${result.player.discord_username}**) ` +
+        'to the initial player state (no team).\n' +
+        'The welcome DM is skipped because MATCH_MODULE_ONLY is enabled. ' +
+        'Use /regist or /repick-team to pick a team.',
+      ...eph,
+    });
+  }
 
   const result = await playerService.initializePlayer({
     discordUserId: target.id,

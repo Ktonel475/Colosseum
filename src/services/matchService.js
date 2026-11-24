@@ -1,6 +1,7 @@
 import prisma from '../database/prisma.js';
 import logger from '../utils/logger.js';
 import { ValidationError, ConflictError, NotFoundError } from '../utils/errors.js';
+import { t } from '../utils/i18n.js';
 import { recordAudit } from './auditService.js';
 
 export async function findMatchByThreadId(threadId, client = prisma) {
@@ -15,7 +16,7 @@ export async function getMatch(identifier) {
     where: { OR: [{ id: identifier }, { discord_thread_id: identifier }] },
     include: { team1: true, team2: true, results: { include: { confirmations: true } } },
   });
-  if (!match) throw new NotFoundError('Match not found');
+  if (!match) throw new NotFoundError('Match not found', { i18nKey: 'errors.match_not_found' });
   return match;
 }
 
@@ -41,16 +42,23 @@ export async function createMatch({
   parentChannel = null,
   actorDiscordId = 'system',
   adminRoleIds = [],
+  locale = 'en',
 }) {
   const team1 = await prisma.teams.findUnique({ where: { team_id: String(team1Identifier) } });
   const team2 = await prisma.teams.findUnique({ where: { team_id: String(team2Identifier) } });
 
-  if (!team1 || !team2) throw new NotFoundError('One or both teams not found');
+  if (!team1 || !team2) {
+    throw new NotFoundError('One or both teams not found', { i18nKey: 'errors.teams_not_found' });
+  }
   if (!team1.is_active || !team2.is_active) {
-    throw new ValidationError('Both teams must be active');
+    throw new ValidationError('Both teams must be active', undefined, {
+      i18nKey: 'errors.teams_inactive',
+    });
   }
   if (team1.team_id === team2.team_id) {
-    throw new ValidationError('A team cannot play against itself');
+    throw new ValidationError('A team cannot play against itself', undefined, {
+      i18nKey: 'errors.self_match',
+    });
   }
 
   const duplicate = await prisma.matches.findFirst({
@@ -63,7 +71,9 @@ export async function createMatch({
     },
   });
   if (duplicate) {
-    throw new ConflictError('An active match between these teams already exists');
+    throw new ConflictError('An active match between these teams already exists', {
+      i18nKey: 'errors.match_exists',
+    });
   }
 
   const match = await prisma.matches.create({
@@ -93,7 +103,9 @@ export async function createMatch({
   } catch (err) {
     logger.error({ err }, 'Failed to create private match thread');
     await prisma.matches.delete({ where: { id: match.id } });
-    throw new ValidationError('Failed to create the private match thread');
+    throw new ValidationError('Failed to create the private match thread', undefined, {
+      i18nKey: 'errors.thread_create_failed',
+    });
   }
 
   const updated = await prisma.matches.update({
@@ -107,14 +119,14 @@ export async function createMatch({
     const ping = (team) =>
       team.discord_role_id ? `<@&${team.discord_role_id}>` : `**${team.team_name}**`;
     await thread.send(
-      `${ping(team1)} ${ping(team2)}\n\n` +
-        `**Match created**\n` +
-        `• **Team 1:** ${team1.team_name} (\`${team1.team_id}\`)\n` +
-        `• **Team 2:** ${team2.team_name} (\`${team2.team_id}\`)\n\n` +
-        'Submit the score from this thread with:\n' +
-        '`/result score1:<Team 1 score> score2:<Team 2 score>`\n\n' +
-        'A registered player from each team must then confirm the submitted result. ' +
-        'Only participants and staff can see this thread.',
+      t(locale, 'match_legacy_thread_intro', {
+        team1Ping: ping(team1),
+        team2Ping: ping(team2),
+        team1: team1.team_name,
+        team1Id: team1.team_id,
+        team2: team2.team_name,
+        team2Id: team2.team_id,
+      }),
     );
   } catch (err) {
     logger.warn({ err }, 'Failed to send intro message in match thread');

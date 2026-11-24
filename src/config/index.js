@@ -11,7 +11,6 @@ const schema = z.object({
 
   DISCORD_BOT_TOKEN: z.string().optional(),
   DISCORD_CLIENT_ID: z.string().optional(),
-  DISCORD_SERVER_ID: z.string().optional(),
   MATCH_MANAGEMENT_CHANNEL_ID: z.string().optional(),
   ADMINISTRATOR_ROLE_ID: z.string().optional(),
   COMPETITION_STAFF_ROLE_ID: z.string().optional(),
@@ -55,7 +54,6 @@ export const config = {
   discord: {
     token: parsed.data.DISCORD_BOT_TOKEN,
     clientId: parsed.data.DISCORD_CLIENT_ID,
-    guildId: parsed.data.DISCORD_SERVER_ID,
     matchChannelId: parsed.data.MATCH_MANAGEMENT_CHANNEL_ID,
     adminRoleId: parsed.data.ADMINISTRATOR_ROLE_ID,
     staffRoleId: parsed.data.COMPETITION_STAFF_ROLE_ID,

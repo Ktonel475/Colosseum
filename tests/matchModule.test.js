@@ -160,7 +160,7 @@ describe('match module only toggle', () => {
 });
 
 describe('match module commands', () => {
-  test('registers an optional channel plus the two user options', () => {
+  test('registers the two required user options before the optional channel', () => {
     const definitions = matchCommandDefinitions.map((command) => command.toJSON());
     expect(definitions.map((c) => c.name).sort()).toEqual([
       'match-create',
@@ -169,7 +169,7 @@ describe('match module commands', () => {
     ]);
 
     const create = definitions.find((c) => c.name === 'match-create');
-    expect(create.options.map((o) => o.name)).toEqual(['channel', 'team1', 'team2']);
+    expect(create.options.map((o) => o.name)).toEqual(['team1', 'team2', 'channel']);
 
     const channelOption = create.options.find((o) => o.name === 'channel');
     expect(channelOption).toMatchObject({ type: 7, required: false });

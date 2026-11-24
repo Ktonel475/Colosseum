@@ -20,19 +20,11 @@ export function createClient() {
 
 export function attachHandlers(client) {
   client.once(Events.ClientReady, async (c) => {
-    logger.info({ user: c.user.tag }, 'Discord bot ready');
+    logger.info(
+      { user: c.user.tag, guilds: c.guilds.cache.map((g) => ({ id: g.id, name: g.name })) },
+      'Discord bot ready',
+    );
     c.user.setActivity('competition management');
-
-    const configuredGuild = config.discord.guildId;
-    if (configuredGuild && !c.guilds.cache.has(configuredGuild)) {
-      logger.error(
-        {
-          configuredGuild,
-          availableGuilds: c.guilds.cache.map((g) => ({ id: g.id, name: g.name })),
-        },
-        'The bot is not a member of DISCORD_SERVER_ID. Invite it to the server and/or fix the ID.',
-      );
-    }
 
     try {
       const result = await registerCommands(c);
@@ -42,10 +34,30 @@ export function attachHandlers(client) {
     }
   });
 
+  // The bot learns its server(s) automatically: whenever it joins a guild,
+  // register the commands there so no DISCORD_SERVER_ID is needed in .env.
+  client.on(Events.GuildCreate, async (guild) => {
+    logger.info({ guild: guild.id, name: guild.name }, 'Joined guild');
+    try {
+      const result = await registerCommands(client, guild.id);
+      logger.info(result, 'Slash commands registered for new guild');
+    } catch (err) {
+      logger.error({ err, guild: guild.id }, 'Failed to register slash commands for new guild');
+    }
+  });
+
+  client.on(Events.GuildDelete, (guild) => {
+    logger.info({ guild: guild.id, name: guild.name }, 'Left guild');
+  });
+
   client.on(Events.InteractionCreate, (interaction) => handleInteraction(interaction, { client }));
 
   client.on(Events.GuildMemberAdd, async (member) => {
     logger.info({ user: member.id, guild: member.guild.id }, 'Member joined');
+    if (config.match.moduleOnly) {
+      logger.debug({ user: member.id }, 'MATCH_MODULE_ONLY is enabled; skipping newcomer welcome DM');
+      return;
+    }
     await sendWelcome(member);
   });
 

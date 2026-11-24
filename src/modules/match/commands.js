@@ -13,13 +13,13 @@ const matchCreate = new SlashCommandBuilder()
   .setName('match-create')
   .setDescription('Create one match thread in a round channel')
   .setDMPermission(false)
-  .addChannelOption(roundChannelOption)
   .addUserOption((o) =>
     o.setName('team1').setDescription('First team (Discord user)').setRequired(true),
   )
   .addUserOption((o) =>
     o.setName('team2').setDescription('Second team (Discord user)').setRequired(true),
-  );
+  )
+  .addChannelOption(roundChannelOption);
 
 const matchCreateBulk = new SlashCommandBuilder()
   .setName('match-create-bulk')

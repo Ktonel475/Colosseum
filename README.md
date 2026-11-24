@@ -55,6 +55,8 @@ Three capabilities are implemented:
   (autocomplete by name/code); the confirmation step still applies.
   A player can change team with `/repick-team teamname:<name or code>`, or run
   `/repick-team` without the option for the message-based search.
+  When `MATCH_MODULE_ONLY=true`, the automatic newcomer DM is skipped; `/regist`,
+  `/repick-team` and every other command keep working as usual.
 - **Development shortcut:** `/init target:<@user>` selects a user with Discord's
   native **User option** (on-server or off-server) and uses the selected user's ID
   as the immutable identifier — never a typed username. It resets that user to the
@@ -139,9 +141,9 @@ without creating a migration.
    - Permissions: `Manage Roles`, `Manage Channels`, `Manage Threads`,
      `Create Private Threads`, `Send Messages in Threads`, `Send Messages`,
      `View Channels`, `Read Message History`, `Use External Emojis` (optional)
-6. Invite the bot to your server.
-7. Copy the server (guild) ID into `DISCORD_SERVER_ID` (enable Developer Mode →
-   right-click server → Copy Server ID).
+6. Invite the bot to your server. No guild ID needs to be configured: the bot
+   detects every server it joins automatically and registers its slash
+   commands there.
 
 > **Important:** the bot's own role must be **above** every team role in the server
 > role hierarchy, otherwise Discord will refuse to add/remove those roles.
@@ -219,11 +221,10 @@ All configuration lives in `.env` (see `.env.example`). Nothing is hardcoded.
 |---|---|
 | `DISCORD_BOT_TOKEN` | Bot token |
 | `DISCORD_CLIENT_ID` | Application/client ID |
-| `DISCORD_SERVER_ID` | Guild where commands register and roles are managed |
 | `MATCH_MANAGEMENT_CHANNEL_ID` | Parent text channel for private match threads |
 | `ADMINISTRATOR_ROLE_ID` | Admin role for administrative commands |
 | `COMPETITION_STAFF_ROLE_ID` | Optional staff role |
-| `MATCH_MODULE_ONLY` | `true` = register only the module's `/match-create`, `/match-create-bulk`, `/result`; `false` (default) = keep legacy match/result commands too |
+| `MATCH_MODULE_ONLY` | `true` = register only the module's `/match-create`, `/match-create-bulk`, `/result` and skip the automatic newcomer welcome DM (all other commands/features stay available); `false` (default) = keep legacy match/result commands too |
 | `SUPPORT_CHANNEL_ID` | Optional support channel for "team not found" |
 | `API_PORT` | REST API port (default 3000) |
 | `API_AUTH_SECRET` | Bearer token required by `/api/export/*` |
@@ -275,8 +276,12 @@ on a persistent volume and back it up (section 14).
 
 Commands are registered automatically when the bot becomes ready:
 
-- If `DISCORD_SERVER_ID` is set, commands are registered **per guild** (instant).
-- Otherwise they are registered **globally** (may take up to an hour to propagate).
+- Every guild the bot is currently in gets its commands registered **per guild**
+  (instant, no `DISCORD_SERVER_ID` required).
+- When the bot is invited to a new server, it registers the commands there as
+  soon as it joins.
+- If the bot is not in any guild yet, commands are registered **globally** as a
+  fallback (may take up to an hour to propagate).
 
 To force re-registration, restart the bot. Command definitions are in
 `src/bot/registerCommands.js`.
@@ -472,11 +477,12 @@ Keep at least one backup outside the machine and test restores periodically.
 
 | Symptom | Likely cause / fix |
 |---|---|
-| Bot online but slash commands missing | `DISCORD_SERVER_ID` wrong or commands not registered; restart and check logs. Global commands can take up to an hour. |
-| Logs `DiscordAPIError[10004]: Unknown Guild` | The bot is not a member of `DISCORD_SERVER_ID`, or that ID is not a server ID. Invite the bot, then copy the real guild ID. |
+| Logs `PrismaClientKnownRequestError` / `The table main.teams does not exist` | The database has no schema yet. Run `npm run prisma:deploy` (or `npm run db:push` in development), then restart the bot. |
+| Bot online but slash commands missing | Commands are registered per guild when the bot starts or joins; check the logs, then restart the bot. |
+| Logs `DiscordAPIError[10004]: Unknown Guild` | A guild the bot was in no longer exists. Re-invite the bot; the guild ID is detected automatically on join. |
 | "Missing Permissions" when creating roles | Bot role is below team roles, or `Manage Roles` not granted. |
 | Cannot create private thread | Bot lacks `Create Private Threads` / `Manage Threads`, or `MATCH_MANAGEMENT_CHANNEL_ID` is not a text channel. |
-| New members get no DM | User has DMs disabled or `Direct Messages` / `Guild Members` intent missing. The bot logs a warning and the member can still use `/repick-team`. |
+| New members get no DM | `MATCH_MODULE_ONLY=true`, user has DMs disabled, or `Direct Messages` / `Guild Members` intent missing. The bot logs a warning and the member can still use `/repick-team`. |
 | Player can't see a match thread | They joined after the match was created or changed teams. `/team-sync` re-syncs roles; thread membership is re-synced on team changes and on match creation. |
 | Import rejected | Check required columns, duplicate IDs, duplicate names inside the same game type, and blank rows. The preview lists the exact row errors. |
 | `/result` says "not associated with a match" | Use the exact thread created by `/match-create`; commands in normal channels or unrelated threads are rejected. Both `/result` and `/match-create*` require `ADMINISTRATOR_ROLE_ID` (or Discord's native `Manage Server` permission for legacy admin checks). |
