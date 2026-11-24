@@ -1,6 +1,6 @@
 {
-  "match.role_gate_denied": "You need the Match Creator role to use this command.",
-  "match.admin_gate_denied": "You need the Match Admin role to use this command.",
+  "match.role_gate_denied": "You need the Administrator role to use this command.",
+  "match.admin_gate_denied": "You need the Administrator role to use this command.",
   "match.self_match_error": "A match must involve two different users.",
   "match.round_channel_required": "Use this command in a round channel that supports threads.",
   "match.thread_name_template": "{team1} vs {team2}",

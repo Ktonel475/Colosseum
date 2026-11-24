@@ -227,7 +227,7 @@ async function handleAutocomplete(interaction) {
     return interaction.respond(matches);
   }
 
-  if (interaction.commandName === 'team-remove' || interaction.commandName === 'match-create') {
+  if (interaction.commandName === 'team-remove') {
     const teams = await teamService.listTeams({});
     const matches = teams
       .filter((t) => `${t.team_id} ${t.team_name}`.toLowerCase().includes(query))
@@ -283,16 +283,12 @@ async function handleCommand(interaction, ctx) {
       return handleRegister(interaction, ctx);
     case 'repick-team':
       return handleRepickTeam(interaction, ctx);
-    case 'match-create':
-      return handleMatchCreate(interaction, ctx);
     case 'match-list':
       return handleMatchList(interaction);
     case 'match-info':
       return handleMatchInfo(interaction, ctx);
     case 'match-close':
       return handleMatchClose(interaction, ctx);
-    case 'result':
-      return handleResultSubmit(interaction, ctx);
     case 'result-status':
       return handleResultStatus(interaction);
     case 'result-review':
@@ -660,32 +656,6 @@ async function handleRepickTeam(interaction, ctx) {
   return showTeamConfirmation(interaction, ctx, team);
 }
 
-async function handleMatchCreate(interaction, ctx) {
-  if (adminOnly(interaction)) return;
-  await interaction.deferReply({ ...eph });
-  const team1 = interaction.options.getString('team1', true);
-  const team2 = interaction.options.getString('team2', true);
-  const guild = getGuild(interaction, ctx.client);
-  const parentChannel = guild?.channels.cache.get(config.discord.matchChannelId);
-  if (!parentChannel) {
-    return interaction.editReply('Match management channel is not configured or not found.');
-  }
-  const { match, warnings } = await matchService.createMatch({
-    team1Identifier: team1,
-    team2Identifier: team2,
-    guild,
-    parentChannel,
-    actorDiscordId: interaction.user.id,
-    adminRoleIds: [config.discord.adminRoleId, config.discord.staffRoleId],
-  });
-  const full = await matchService.getMatch(match.id);
-  let msg = `Match created: **${full.team1?.team_name} vs ${full.team2?.team_name}**\nThread: <#${full.discord_thread_id}>`;
-  if (warnings.length) {
-    msg += `\n\n⚠️ ${warnings.length} participant(s) could not be added to the thread. Check logs.`;
-  }
-  return interaction.editReply(msg);
-}
-
 async function handleMatchList(interaction) {
   const status = interaction.options.getString('status') ?? undefined;
   const matches = await matchService.listMatches({ status });
@@ -737,72 +707,6 @@ async function handleMatchClose(interaction, ctx) {
   }
   // The thread is deleted by closeMatch, so this reply may fail if it was sent there.
   return interaction.editReply(`Match ${match.id} closed and thread removed.`).catch(() => {});
-}
-
-async function handleResultSubmit(interaction, ctx) {
-  await interaction.deferReply({ ...eph });
-  if (!interaction.channel?.isThread?.()) {
-    return interaction.editReply('This command can only be used inside a private match thread.');
-  }
-
-  const match = await matchService.findMatchByThreadId(interaction.channel.id);
-  if (!match) return interaction.editReply('This thread is not associated with a match.');
-
-  const mentions = `${teamRoleMention(match.team1)} ${teamRoleMention(match.team2)}`;
-
-  const pending = match.results?.find((r) => r.status === 'pending');
-  if (pending) {
-    return interaction.editReply({
-      content:
-        `${mentions}\n` +
-        `A result **${pending.score1}-${pending.score2}** is already waiting for confirmation.\n` +
-        'Both teams must confirm it before it becomes final. A registered player from each team ' +
-        'should press **Confirm result**.',
-      components: [resultConfirmRow(pending.id)],
-    });
-  }
-
-  const final = match.results?.find((r) => r.status === 'final');
-  if (final) {
-    return interaction.editReply(
-      `This match already has a final result: **${match.team1.team_name} ` +
-        `${final.score1}-${final.score2} ${match.team2.team_name}**.`,
-    );
-  }
-
-  const score1 = interaction.options.getInteger('score1', true);
-  const score2 = interaction.options.getInteger('score2', true);
-  const { result } = await resultService.submitResult({
-    threadId: interaction.channel.id,
-    discordUserId: interaction.user.id,
-    score1,
-    score2,
-  });
-
-  if (config.resultConfirmationPolicy === 'both_teams') {
-    await interaction.channel
-      .send({
-        content:
-          `${mentions}\n` +
-          `**Result submitted:** ${match.team1.team_name} **${score1} - ${score2}** ${match.team2.team_name}\n` +
-          `• **Team 1:** ${match.team1.team_name}\n` +
-          `• **Team 2:** ${match.team2.team_name}\n\n` +
-          'Both teams must confirm. A registered player from **each** team should press ' +
-          '**Confirm result** below.',
-        components: [resultConfirmRow(result.id)],
-      })
-      .catch(() => {});
-  } else if (config.resultConfirmationPolicy === 'automatic') {
-    await announceFinalResult(interaction, ctx, result.id);
-  }
-
-  const policyText = {
-    both_teams: 'Awaiting confirmation from both teams.',
-    administrator: 'Awaiting administrator confirmation.',
-    automatic: 'Automatically confirmed and announced.',
-  }[config.resultConfirmationPolicy];
-
-  return interaction.editReply(`Result submitted: **${score1}-${score2}**. ${policyText}`);
 }
 
 async function handleResultStatus(interaction) {

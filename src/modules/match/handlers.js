@@ -1,7 +1,7 @@
 import { MessageFlags } from 'discord.js';
 import config from '../../config/index.js';
 import logger from '../../utils/logger.js';
-import { t } from '../../utils/i18n.js';
+import { createTranslator } from '../../utils/i18n.js';
 import {
   MatchModuleError,
   createBulkMatches,
@@ -27,6 +27,7 @@ import {
   buildWinnerSelect,
 } from './ui.js';
 
+const t = createTranslator('match');
 const eph = { flags: MessageFlags.Ephemeral };
 const defaultRepository = createRepository();
 

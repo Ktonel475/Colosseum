@@ -14,7 +14,7 @@
 export { matchCommandDefinitions, matchCommandNames } from './commands.js';
 export { handleMatchCommand, handleMatchComponent } from './handlers.js';
 export { isMatchComponentId, CUSTOM_ID_PREFIX } from './ui.js';
-export { t, resolveLocale } from './i18n.js';
+export { t, resolveLocale } from '../../utils/i18n.js';
 export { createRepository } from './repository/index.js';
 
 export default {};

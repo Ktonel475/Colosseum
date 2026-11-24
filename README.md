@@ -81,10 +81,11 @@ Three capabilities are implemented:
   admin picks the winner, then confirms with a button; only the same admin who
   started the flow can confirm. Confirming persists the result, marks the match
   `completed`, and posts a localized result embed in the thread.
-- The module reads `MATCH_CREATOR_ROLE_ID` and `MATCH_ADMIN_ROLE_ID`, stores match
-  records through a swappable repository (Prisma model
-  `match_module_records`), and loads every user-facing string from
-  `src/modules/match/locales/{en,th}.json`.
+- The module uses the single `ADMINISTRATOR_ROLE_ID` gate for both match creation
+  and result entry, stores match records through a swappable repository (Prisma
+  model `match_module_records`), and loads every user-facing string from the
+  project-wide locale files `src/locales/{en,th}.json` through
+  `src/utils/i18n.js`.
 - The legacy team-code subsystem (`/match-list`, `/match-info`, `/match-close`,
   `/result-status`, `/result-review`, `/result-edit`, `/result-cancel`) remains
   registered and continues to use the original `matches`/`results` tables; it is
@@ -221,8 +222,6 @@ All configuration lives in `.env` (see `.env.example`). Nothing is hardcoded.
 | `MATCH_MANAGEMENT_CHANNEL_ID` | Parent text channel for private match threads |
 | `ADMINISTRATOR_ROLE_ID` | Admin role for administrative commands |
 | `COMPETITION_STAFF_ROLE_ID` | Optional staff role |
-| `MATCH_CREATOR_ROLE_ID` | Role required by `/match-create` and `/match-create-bulk` |
-| `MATCH_ADMIN_ROLE_ID` | Role required by `/result` |
 | `MATCH_MODULE_ONLY` | `true` = register only the module's `/match-create`, `/match-create-bulk`, `/result`; `false` (default) = keep legacy match/result commands too |
 | `SUPPORT_CHANNEL_ID` | Optional support channel for "team not found" |
 | `API_PORT` | REST API port (default 3000) |
@@ -298,12 +297,12 @@ alone are never trusted.
 | `/regist [teamname]` | Everyone | Register and pick a team by name/code, or run without the option for message search → confirm |
 | `/repick-team [teamname]` | Everyone | Change team by name/code, or run without the option for message search → confirm |
 | `/init target:@user` | Dev only | Reset the selected user to the initial player state (no team) and resend the welcome DM; enabled by `ENABLE_DEV_COMMANDS` |
-| `/match-create team1 team2` | Match Creator role | Create one private match thread in the current round channel (User options) |
-| `/match-create-bulk` | Match Creator role | Assemble N pairings in a panel and create all threads |
+| `/match-create team1 team2` | Admin role | Create one private match thread in the current round channel (User options) |
+| `/match-create-bulk` | Admin role | Assemble N pairings in a panel and create all threads |
 | `/match-list [status]` | Everyone | List matches (legacy team-code subsystem) |
 | `/match-info [match]` | Everyone | Match details (or current thread) |
 | `/match-close [match]` | Admin | Close match and delete its private thread |
-| `/result` | Match Admin role | Pick the winner inside a module match thread; confirm as the same admin |
+| `/result` | Admin role | Pick the winner inside a module match thread; confirm as the same admin |
 | `/result-status` | Everyone | Show result/confirmation status |
 | `/result-review` | Admin | Review pending results with buttons |
 | `/result-edit result_id score1 score2` | Admin | Correct a result (audited) |
@@ -479,7 +478,7 @@ Keep at least one backup outside the machine and test restores periodically.
 | New members get no DM | User has DMs disabled or `Direct Messages` / `Guild Members` intent missing. The bot logs a warning and the member can still use `/repick-team`. |
 | Player can't see a match thread | They joined after the match was created or changed teams. `/team-sync` re-syncs roles; thread membership is re-synced on team changes and on match creation. |
 | Import rejected | Check required columns, duplicate IDs, duplicate names inside the same game type, and blank rows. The preview lists the exact row errors. |
-| `/result` says "not associated with a match" | Use the exact thread created by `/match-create`; commands in normal channels or unrelated threads are rejected. `/result` requires `MATCH_ADMIN_ROLE_ID`; `/match-create*` requires `MATCH_CREATOR_ROLE_ID`. |
+| `/result` says "not associated with a match" | Use the exact thread created by `/match-create`; commands in normal channels or unrelated threads are rejected. Both `/result` and `/match-create*` require `ADMINISTRATOR_ROLE_ID` (or Discord's native `Manage Server` permission for legacy admin checks). |
 | API export returns 503 | `API_AUTH_SECRET` is not set. |
 | Prisma "database is locked" | Run a single instance, or use shorter transactions; SQLite allows one writer. |
 
@@ -582,11 +581,13 @@ templates/teams-template.xlsx  # Excel import template
   of failing; a **Search again** button on the confirmation step discards the
   pending selection and restarts the search.
 - **Extractable match module.** `src/modules/match` owns `/match-create`,
-  `/match-create-bulk` and `/result`. It reads env only through `config.match`,
-  persists via a repository interface (`createRepository()` → Prisma or memory),
-  and loads Thai/English strings from its own locale files. The host only merges
-  its command definitions and forwards `matchmod:` component interactions; the
-  module never imports the command registry, `/init`, or player onboarding code.
+  `/match-create-bulk` and `/result`. It reads env only through `config.match`
+  and `config.discord.adminRoleId`, persists via a repository interface
+  (`createRepository()` → Prisma or memory), and loads Thai/English strings from
+  the project-wide `src/locales/{en,th}.json` using `src/utils/i18n.js`. The host
+  only merges its command definitions and forwards `matchmod:` component
+  interactions; the module never imports the command registry, `/init`, or player
+  onboarding code.
 - **Interaction safety.** Confirmation tokens are single-use, bound to the user,
   expire after `INTERACTION_EXPIRATION`, and are consumed atomically, so double
   clicks or replayed custom IDs cannot assign a team twice. Custom IDs are never

@@ -1,5 +1,7 @@
 import { ChannelType } from 'discord.js';
-import { t } from './i18n.js';
+import { createTranslator } from '../../utils/i18n.js';
+
+const t = createTranslator('match');
 
 /** Error carrying a locale key so handlers can localize it. */
 export class MatchModuleError extends Error {

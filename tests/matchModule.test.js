@@ -1,46 +1,101 @@
-import { t, resolveLocale, preloadLocales } from '../src/utils/i18n.js';
+import prisma from '../src/database/prisma.js';
+import { resetDb } from './helpers.js';
+import { createTranslator, preloadLocales, resolveLocale, t } from '../src/utils/i18n.js';
 import { matchCommandDefinitions } from '../src/modules/match/commands.js';
-import { MatchModuleError } from '../src/modules/match/service.js';
-import { createBulkMatches, createMatch, recordResult } from '../src/modules/match/service.js';
+import {
+  MatchModuleError,
+  createBulkMatches,
+  createMatch,
+  recordResult,
+} from '../src/modules/match/service.js';
 import { MemoryMatchRepository } from '../src/modules/match/repository/memoryRepository.js';
 import { PrismaMatchRepository } from '../src/modules/match/repository/prismaRepository.js';
 import { handleMatchCommand, handleMatchComponent } from '../src/modules/match/handlers.js';
+import { LEGACY_MATCH_COMMANDS, applyMatchModuleMode } from '../src/bot/registerCommands.js';
 
-beforeEach(() => {
-  // Reset state before each test
-});
-beforeAll(async () => await preloadLocales());
-afterAll(async () => {
-  // Clean up after all tests
-});
+beforeAll(() => preloadLocales());
+beforeEach(resetDb);
+afterAll(async () => prisma.$disconnect());
 
-describe('match module only toggle', () => {
-  test('keeps both subsystems when disabled', () => {
-    const definitions = [
-      { name: 'match-create' },
-      { name: 'match-list' },
-      { name: 'team-list' },
-    ];
-    expect(applyMatchModuleMode(definitions, false)).toEqual(definitions);
-  });
+function makeRoundChannel(id = 'round-1') {
+  const created = [];
+  return {
+    id,
+    created,
+    isThread: () => false,
+    threads: {
+      create: async (options) => {
+        const thread = {
+          id: `thread-${created.length + 1}`,
+          name: options.name,
+          options,
+          messages: [],
+          delete: async () => {},
+          send: async (payload) => {
+            thread.messages.push(payload);
+            return payload;
+          },
+        };
+        created.push(thread);
+        return thread;
+      },
+    },
+  };
+}
 
-  test('removes legacy match/result commands when enabled', () => {
-    const definitions = [
-      { name: 'team-list' },
-      { name: 'match-create' },
-      { name: 'match-create-bulk' },
-      { name: 'result' },
-      ...[...LEGACY_MATCH_COMMANDS].map((name) => ({ name })),
-    ];
-    const names = applyMatchModuleMode(definitions, true).map((command) => command.name);
-    expect(names).toEqual(['team-list', 'match-create', 'match-create-bulk', 'result']);
-    for (const legacy of LEGACY_MATCH_COMMANDS) {
-      expect(names).not.toContain(legacy);
-    }
-  });
-});
+function makeInteraction(overrides = {}) {
+  const state = { replies: [], edits: [], updates: [], deferred: false, replied: false };
+  const interaction = {
+    commandName: 'match-create',
+    locale: 'en',
+    user: { id: 'admin-1', username: 'admin' },
+    member: { roles: { cache: { has: () => false } } },
+    channel: null,
+    guild: { members: { fetch: async () => null } },
+    client: {
+      users: {
+        fetch: async (id) => ({ id, username: `user-${id}`, displayName: `User ${id}` }),
+      },
+      channels: { fetch: async () => null },
+    },
+    values: [],
+    options: { getUser: () => null },
+    ...overrides,
+  };
+  interaction.reply = async (payload) => {
+    state.replied = true;
+    state.replies.push(payload);
+  };
+  interaction.deferReply = async () => {
+    state.deferred = true;
+  };
+  interaction.editReply = async (payload) => {
+    state.replied = true;
+    state.edits.push(payload);
+  };
+  interaction.followUp = async (payload) => {
+    state.replies.push(payload);
+  };
+  interaction.update = async (payload) => {
+    state.replied = true;
+    state.updates.push(payload);
+  };
+  interaction.deferUpdate = async () => {
+    state.deferred = true;
+  };
+  state.interaction = interaction;
+  return state;
+}
 
-describe('match module i18n', () => {
+function withRoles(...roleIds) {
+  return { roles: { cache: { has: (id) => roleIds.includes(id) } } };
+}
+
+function threadChannel(id = 'thread-1') {
+  return { id, isThread: () => true };
+}
+
+describe('project i18n', () => {
   test('resolves Thai locales and falls back to English', () => {
     expect(resolveLocale('th')).toBe('th');
     expect(resolveLocale('th-TH')).toBe('th');
@@ -53,6 +108,12 @@ describe('match module i18n', () => {
     expect(t('th-TH', 'match.thread_name_template', { team1: 'A', team2: 'B' })).toBe('A พบ B');
     expect(t('fr', 'match.self_match_error')).toBe(t('en', 'match.self_match_error'));
     expect(t('en', 'missing_key')).toBe('missing_key');
+  });
+
+  test('namespaced translators resolve match keys', () => {
+    const tr = createTranslator('match');
+    expect(tr('en', 'self_match_error')).toBe(t('en', 'match.self_match_error'));
+    expect(tr('th', 'self_match_error')).toBe(t('th', 'match.self_match_error'));
   });
 
   test('has every required key in both dictionaries', () => {
@@ -78,6 +139,26 @@ describe('match module i18n', () => {
   });
 });
 
+describe('match module only toggle', () => {
+  test('keeps both subsystems when disabled', () => {
+    const definitions = [{ name: 'match-create' }, { name: 'match-list' }, { name: 'team-list' }];
+    expect(applyMatchModuleMode(definitions, false)).toEqual(definitions);
+  });
+
+  test('removes legacy match/result commands when enabled', () => {
+    const definitions = [
+      { name: 'team-list' },
+      { name: 'match-create' },
+      { name: 'match-create-bulk' },
+      { name: 'result' },
+      ...[...LEGACY_MATCH_COMMANDS].map((name) => ({ name })),
+    ];
+    const names = applyMatchModuleMode(definitions, true).map((command) => command.name);
+    expect(names).toEqual(['team-list', 'match-create', 'match-create-bulk', 'result']);
+    for (const legacy of LEGACY_MATCH_COMMANDS) expect(names).not.toContain(legacy);
+  });
+});
+
 describe('match module commands', () => {
   test('register user options and never a channel argument', () => {
     const definitions = matchCommandDefinitions.map((command) => command.toJSON());
@@ -85,13 +166,12 @@ describe('match module commands', () => {
       'match-create',
       'match-create-bulk',
       'result',
-    ];
+    ]);
 
     const create = definitions.find((c) => c.name === 'match-create');
     const userOptions = create.options.filter((o) => o.type === 6).map((o) => o.name);
     expect(userOptions).toEqual(['team1', 'team2']);
     expect(create.options.find((o) => o.name === 'channel')).toBeUndefined();
-    expect(create.options.every((o) => o.type !== 3 || !['team1', 'team2'].includes(o.name))).toBe(true);
   });
 });
 
@@ -119,9 +199,8 @@ describe('match service', () => {
   });
 
   test('uses the Thai thread name template', async () => {
-    const channel = makeRoundChannel();
     const { thread } = await createMatch({
-      roundChannel: channel,
+      roundChannel: makeRoundChannel(),
       team1: { id: 'u1', name: 'Alice' },
       team2: { id: 'u2', name: 'Bob' },
       locale: 'th-TH',
@@ -139,14 +218,13 @@ describe('match service', () => {
         locale: 'en',
         repository: new MemoryMatchRepository(),
       }),
-    ).rejects.toMatchObject({ key: 'match.self_match_error' });
+    ).rejects.toMatchObject({ key: 'self_match_error' });
   });
 
   test('records a result once and marks the match completed', async () => {
     const repository = new MemoryMatchRepository();
-    const channel = makeRoundChannel();
     const { thread } = await createMatch({
-      roundChannel: channel,
+      roundChannel: makeRoundChannel(),
       team1: { id: 'u1', name: 'Alice' },
       team2: { id: 'u2', name: 'Bob' },
       locale: 'en',
@@ -158,14 +236,14 @@ describe('match service', () => {
       winner: 'team2',
       decidedBy: 'admin-1',
       repository,
-    );
+    });
     expect(match.status).toBe('completed');
     expect(match.completedAt).toBeInstanceOf(Date);
     expect(result).toMatchObject({ winner: 'team2', winnerId: 'u2', decidedBy: 'admin-1' });
 
     await expect(
       recordResult({ threadId: thread.id, winner: 'team1', decidedBy: 'admin-1', repository }),
-    ).rejects.toMatchObject({ key: 'match.result_already_completed' });
+    ).rejects.toMatchObject({ key: 'result_already_completed' });
   });
 
   test('bulk creation reports per-pair success and failure', async () => {
@@ -205,7 +283,7 @@ describe('match service', () => {
 });
 
 describe('match command handlers', () => {
-  test('rejects users without the creator role (localized)', async () => {
+  test('rejects users without the administrator role (localized)', async () => {
     const state = makeInteraction({
       locale: 'th',
       channel: makeRoundChannel(),
@@ -238,12 +316,16 @@ describe('match command handlers', () => {
             ? { id: 'u1', username: 'alice', displayName: 'Alice' }
             : { id: 'u2', username: 'bob', displayName: 'Bob' },
       },
-    };
+    });
     await handleMatchCommand(state.interaction);
 
     expect(channel.created).toHaveLength(1);
     expect(channel.created[0].name).toBe('Alice vs Bob');
     expect(state.edits[0]).toContain('<#thread-1>');
+
+    const repository = new PrismaMatchRepository();
+    const saved = await repository.findByThreadId('thread-1');
+    expect(saved).toMatchObject({ team1Id: 'u1', team2Id: 'u2' });
   });
 
   test('bulk panel creates N threads in one flow', async () => {
@@ -254,8 +336,7 @@ describe('match command handlers', () => {
       channel,
     });
     await handleMatchCommand(panel.interaction);
-    const components = panel.replies[0].components;
-    const token = components[0].components[0].data.custom_id.split(':')[3];
+    const token = panel.replies[0].components[0].components[0].data.custom_id.split(':')[3];
 
     const pick = async (team, userId) => {
       const state = makeInteraction({
@@ -263,7 +344,7 @@ describe('match command handlers', () => {
         channel,
         customId: `matchmod:bulk:${team}:${token}`,
         values: [userId],
-      };
+      });
       await handleMatchComponent(state.interaction);
       return state;
     };
@@ -273,7 +354,7 @@ describe('match command handlers', () => {
         member: withRoles('role-admin'),
         channel,
         customId: `matchmod:bulk:${action}:${token}`,
-      };
+      });
       await handleMatchComponent(state.interaction);
       return state;
     };
@@ -288,11 +369,7 @@ describe('match command handlers', () => {
 
     const confirmed = await click('confirm');
     expect(channel.created).toHaveLength(2);
-    expect(confirmed.edits[0].content).toContain(t('en', 'match.bulk_summary', {
-      created: 2,
-      total: 2,
-      lines: '',
-    }).split('\n')[0]);
+    expect(confirmed.edits[0].content).toContain('Created 2 of 2');
 
     const repository = new PrismaMatchRepository();
     expect(await repository.listByRound('round-1')).toHaveLength(2);
@@ -311,6 +388,17 @@ describe('result flow', () => {
     return repository;
   }
 
+  function makeClient(posted) {
+    return {
+      users: {
+        fetch: async (id) => ({ id, username: `user-${id}`, displayName: `User ${id}` }),
+      },
+      channels: {
+        fetch: async () => ({ send: async (payload) => posted.push(payload) }),
+      },
+    };
+  }
+
   test('refuses outside a match thread', async () => {
     const state = makeInteraction({
       commandName: 'result',
@@ -324,7 +412,7 @@ describe('result flow', () => {
   test('refuses non-admins', async () => {
     const state = makeInteraction({
       commandName: 'result',
-      channel: { id: 'thread-1', isThread: () => true },
+      channel: threadChannel(),
     });
     await handleMatchCommand(state.interaction);
     expect(state.replies[0].content).toBe(t('en', 'match.admin_gate_denied'));
@@ -332,26 +420,24 @@ describe('result flow', () => {
 
   test('requires confirmation from the same admin and persists the result', async () => {
     const repository = await seedThread();
-    const threadChannel = { id: 'thread-1', isThread: () => true };
-    const client = {
-      users: {
-        fetch: async (id) => ({ id, username: `user-${id}`, displayName: `User ${id}` }),
-      },
-      channels: { fetch: async () => ({ send: async (payload) => {} }) },
-    };
+    const posted = [];
+    const client = makeClient(posted);
+    const channel = threadChannel();
 
     const command = makeInteraction({
       commandName: 'result',
       member: withRoles('role-admin'),
-      channel: threadChannel,
+      channel,
       client,
-    };
+    });
     await handleMatchCommand(command.interaction);
-    expect(command.replies[0].content).toBe(t('en', 'match.winner_prompt', { team1: 'User u1', team2: 'User u2' }));
+    expect(command.replies[0].content).toBe(
+      t('en', 'match.winner_prompt', { team1: 'User u1', team2: 'User u2' }),
+    );
 
     const pick = makeInteraction({
       member: withRoles('role-admin'),
-      channel: threadChannel,
+      channel,
       client,
       customId: 'matchmod:result:pick:thread-1',
       values: ['team1'],
@@ -359,24 +445,25 @@ describe('result flow', () => {
     await handleMatchComponent(pick.interaction);
     const confirmPayload = pick.updates[0];
     expect(confirmPayload.content).toContain('User u1');
-    const token = confirmPayload.components[0].components[1].data.custom_id.split(':')[3];
+    const token = confirmPayload.components[0].components[0].data.custom_id.split(':')[3];
 
     const otherAdmin = makeInteraction({
+      user: { id: 'admin-2', username: 'other' },
       member: withRoles('role-admin'),
-      channel: threadChannel,
+      channel,
       client,
       customId: `matchmod:result:confirm:${token}`,
-    );
+    });
     await handleMatchComponent(otherAdmin.interaction);
     expect(otherAdmin.replies[0].content).toBe(t('en', 'match.result_only_requester'));
     expect((await repository.findByThreadId('thread-1')).status).toBe('active');
 
     const requester = makeInteraction({
       member: withRoles('role-admin'),
-      channel: threadChannel,
+      channel,
       client,
       customId: `matchmod:result:confirm:${token}`,
-    );
+    });
     await handleMatchComponent(requester.interaction);
     expect(requester.edits[0].content).toBe(t('en', 'match.result_confirmed'));
     expect(posted).toHaveLength(1);
@@ -388,17 +475,13 @@ describe('result flow', () => {
 
   test('cancel dismisses without completing the match', async () => {
     const repository = await seedThread();
-    const threadChannel = { id: 'thread-1', isThread: () => true };
-    const client = {
-      users: {
-        fetch: async (id) => ({ id, username: `user-${id}`, displayName: `User ${id}` }),
-      },
-      channels: { fetch: async () => ({ send: async () => {} }) },
-    };
+    const posted = [];
+    const client = makeClient(posted);
+    const channel = threadChannel();
 
     const pick = makeInteraction({
       member: withRoles('role-admin'),
-      channel: threadChannel,
+      channel,
       client,
       customId: 'matchmod:result:pick:thread-1',
       values: ['team2'],
@@ -408,10 +491,10 @@ describe('result flow', () => {
 
     const cancel = makeInteraction({
       member: withRoles('role-admin'),
-      channel: threadChannel,
+      channel,
       client,
       customId: `matchmod:result:cancel:${token}`,
-    );
+    });
     await handleMatchComponent(cancel.interaction);
     expect(cancel.updates[0].content).toBe(t('en', 'match.cancel_notice'));
     expect((await repository.findByThreadId('thread-1')).status).toBe('active');

@@ -6,7 +6,9 @@ import {
   StringSelectMenuBuilder,
   UserSelectMenuBuilder,
 } from 'discord.js';
-import { t } from '../../utils/i18n.js';
+import { createTranslator } from '../../utils/i18n.js';
+
+const t = createTranslator('match');
 
 export const CUSTOM_ID_PREFIX = 'matchmod';
 
