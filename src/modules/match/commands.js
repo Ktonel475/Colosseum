@@ -1,9 +1,19 @@
-import { SlashCommandBuilder } from 'discord.js';
+import { ChannelType, SlashCommandBuilder } from 'discord.js';
+
+const roundChannelOption = (o) =>
+  o
+    .setName('channel')
+    .setDescription(
+      'Round channel where the private thread is created (defaults to the current channel)',
+    )
+    .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
+    .setRequired(false);
 
 const matchCreate = new SlashCommandBuilder()
   .setName('match-create')
-  .setDescription('Create one match thread in the current round channel')
+  .setDescription('Create one match thread in a round channel')
   .setDMPermission(false)
+  .addChannelOption(roundChannelOption)
   .addUserOption((o) =>
     o.setName('team1').setDescription('First team (Discord user)').setRequired(true),
   )

@@ -67,9 +67,10 @@ Three capabilities are implemented:
 
 **Match and result management (extractable module: `src/modules/match`)**
 
-- `/match-create team1:@user team2:@user` creates one private thread in the
-  **current channel**, which is treated as the round. Teams are selected with
-  Discord's native User option and stored by immutable user ID. The thread name
+- `/match-create [channel] team1:@user team2:@user` creates one private thread in
+  the chosen **round channel** (or the current channel when `channel` is omitted),
+  so a single server can host many independent round channels. Teams are selected
+  with Discord's native User option and stored by immutable user ID. The thread name
   comes from the locale template (`{team1} vs {team2}` in English,
   `{team1} พบ {team2}` in Thai).
 - `/match-create-bulk` opens an ephemeral panel with two user pickers. Add as many
@@ -297,7 +298,7 @@ alone are never trusted.
 | `/regist [teamname]` | Everyone | Register and pick a team by name/code, or run without the option for message search → confirm |
 | `/repick-team [teamname]` | Everyone | Change team by name/code, or run without the option for message search → confirm |
 | `/init target:@user` | Dev only | Reset the selected user to the initial player state (no team) and resend the welcome DM; enabled by `ENABLE_DEV_COMMANDS` |
-| `/match-create team1 team2` | Admin role | Create one private match thread in the current round channel (User options) |
+| `/match-create [channel] team1 team2` | Admin role | Create one private match thread in the selected round channel (defaults to the current channel; User options for teams) |
 | `/match-create-bulk` | Admin role | Assemble N pairings in a panel and create all threads |
 | `/match-list [status]` | Everyone | List matches (legacy team-code subsystem) |
 | `/match-info [match]` | Everyone | Match details (or current thread) |

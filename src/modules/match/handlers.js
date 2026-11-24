@@ -74,6 +74,18 @@ async function resolveTeamName(interaction, userId) {
   return user?.displayName || user?.globalName || user?.username || String(userId);
 }
 
+/**
+ * Round channel resolution: an explicit `channel` option wins, otherwise the
+ * channel where the command was used. The channel must be able to host private
+ * threads, so threads themselves are rejected.
+ */
+function resolveRoundChannel(interaction) {
+  const selected = interaction.options?.getChannel?.('channel') ?? null;
+  const channel = selected ?? interaction.channel;
+  if (!channel?.threads?.create) return null;
+  return channel;
+}
+
 /* ------------------------------ commands -------------------------------- */
 
 async function handleMatchCreate(interaction, repository = defaultRepository) {
@@ -82,7 +94,8 @@ async function handleMatchCreate(interaction, repository = defaultRepository) {
     if (!isCreator(interaction)) {
       return interaction.reply({ content: t(locale, 'role_gate_denied'), ...eph });
     }
-    if (!interaction.channel?.threads?.create) {
+    const roundChannel = resolveRoundChannel(interaction);
+    if (!roundChannel) {
       return interaction.reply({ content: t(locale, 'round_channel_required'), ...eph });
     }
 
@@ -94,7 +107,7 @@ async function handleMatchCreate(interaction, repository = defaultRepository) {
 
     await interaction.deferReply({ ...eph });
     const { thread } = await createMatch({
-      roundChannel: interaction.channel,
+      roundChannel,
       team1,
       team2,
       locale,

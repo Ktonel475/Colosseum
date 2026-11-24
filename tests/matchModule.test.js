@@ -160,7 +160,7 @@ describe('match module only toggle', () => {
 });
 
 describe('match module commands', () => {
-  test('register user options and never a channel argument', () => {
+  test('registers an optional channel plus the two user options', () => {
     const definitions = matchCommandDefinitions.map((command) => command.toJSON());
     expect(definitions.map((c) => c.name).sort()).toEqual([
       'match-create',
@@ -169,9 +169,14 @@ describe('match module commands', () => {
     ]);
 
     const create = definitions.find((c) => c.name === 'match-create');
+    expect(create.options.map((o) => o.name)).toEqual(['channel', 'team1', 'team2']);
+
+    const channelOption = create.options.find((o) => o.name === 'channel');
+    expect(channelOption).toMatchObject({ type: 7, required: false });
+    expect(channelOption.channel_types).toEqual([0, 5]); // GuildText, GuildAnnouncement
+
     const userOptions = create.options.filter((o) => o.type === 6).map((o) => o.name);
     expect(userOptions).toEqual(['team1', 'team2']);
-    expect(create.options.find((o) => o.name === 'channel')).toBeUndefined();
   });
 });
 
@@ -326,6 +331,45 @@ describe('match command handlers', () => {
     const repository = new PrismaMatchRepository();
     const saved = await repository.findByThreadId('thread-1');
     expect(saved).toMatchObject({ team1Id: 'u1', team2Id: 'u2' });
+  });
+
+  test('uses the channel option instead of the current channel', async () => {
+    const current = makeRoundChannel('round-current');
+    const selected = makeRoundChannel('round-selected');
+    const state = makeInteraction({
+      member: withRoles('role-admin'),
+      channel: current,
+      options: {
+        getChannel: (name) => (name === 'channel' ? selected : null),
+        getUser: (name) =>
+          name === 'team1'
+            ? { id: 'u1', username: 'alice', displayName: 'Alice' }
+            : { id: 'u2', username: 'bob', displayName: 'Bob' },
+      },
+    });
+
+    await handleMatchCommand(state.interaction);
+
+    expect(current.created).toHaveLength(0);
+    expect(selected.created).toHaveLength(1);
+    const saved = await new PrismaMatchRepository().findByThreadId('thread-1');
+    expect(saved.roundChannelId).toBe('round-selected');
+    expect(state.edits[0]).toContain('<#thread-1>');
+  });
+
+  test('rejects a selected channel that cannot host threads', async () => {
+    const selected = { id: 'voice-1' }; // no threads.create
+    const state = makeInteraction({
+      member: withRoles('role-admin'),
+      channel: makeRoundChannel(),
+      options: {
+        getChannel: () => selected,
+        getUser: (name) => ({ id: name === 'team1' ? 'u1' : 'u2', username: name }),
+      },
+    });
+
+    await handleMatchCommand(state.interaction);
+    expect(state.replies[0].content).toBe(t('en', 'match.round_channel_required'));
   });
 
   test('bulk panel creates N threads in one flow', async () => {
