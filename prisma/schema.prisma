@@ -1,0 +1,147 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model teams {
+  // Primary key: the external team code (รหัสทีม / team_id)
+  team_id         String   @id
+  team_name       String
+  game_type       String? // ประเภทเกม
+  discord_role_id String?
+  is_active       Boolean  @default(true)
+  created_at      DateTime @default(now())
+  updated_at      DateTime @default(now()) @updatedAt
+
+  players        players[]
+  matchesAsTeam1 matches[] @relation("MatchTeams1")
+  matchesAsTeam2 matches[] @relation("MatchTeams2")
+
+  @@index([team_name])
+  @@index([game_type])
+  @@index([is_active])
+}
+
+model players {
+  id               String   @id @default(cuid())
+  discord_user_id  String   @unique
+  discord_username String
+  team_id          String?
+  team_role_id     String?
+  registered_at    DateTime @default(now())
+  updated_at       DateTime @default(now()) @updatedAt
+
+  team             teams?    @relation(fields: [team_id], references: [team_id])
+  submittedResults results[] @relation("ResultSubmittedBy")
+
+  @@index([discord_user_id])
+  @@index([team_id])
+}
+
+model matches {
+  id                String   @id @default(cuid())
+  team1_id          String
+  team2_id          String
+  discord_thread_id String?  @unique
+  status            String   @default("active")
+  created_at        DateTime @default(now())
+  updated_at        DateTime @default(now()) @updatedAt
+
+  team1   teams     @relation("MatchTeams1", fields: [team1_id], references: [team_id])
+  team2   teams     @relation("MatchTeams2", fields: [team2_id], references: [team_id])
+  results results[]
+
+  @@index([team1_id])
+  @@index([team2_id])
+  @@index([discord_thread_id])
+  @@index([status])
+}
+
+model results {
+  id           String    @id @default(cuid())
+  match_id     String
+  score1       Int
+  score2       Int
+  status       String    @default("pending")
+  submitted_by String
+  submitted_at DateTime  @default(now())
+  confirmed_at DateTime?
+  updated_at   DateTime  @default(now()) @updatedAt
+
+  match           matches                @relation(fields: [match_id], references: [id])
+  submittedByUser players?               @relation("ResultSubmittedBy", fields: [submitted_by], references: [discord_user_id])
+  confirmations   result_confirmations[]
+
+  @@index([match_id])
+  @@index([status])
+  @@index([submitted_by])
+  @@index([submitted_at])
+}
+
+model result_confirmations {
+  id                  String   @id @default(cuid())
+  result_id           String
+  discord_user_id     String
+  confirmation_status String // "confirmed", "rejected", "pending", "cancelled"
+  confirmed_at        DateTime @default(now())
+  notes               String?
+
+  result results @relation(fields: [result_id], references: [id])
+
+  @@index([result_id])
+  @@index([discord_user_id])
+  @@index([confirmation_status])
+}
+
+// Isolated storage for the extractable match module (src/modules/match).
+// Existing `matches`/`results` models belong to the legacy subsystem.
+model match_module_records {
+  id               String    @id @default(cuid())
+  round_channel_id String
+  thread_id        String    @unique
+  team1_id         String
+  team2_id         String
+  status           String    @default("active")
+  result           String?
+  created_at       DateTime  @default(now())
+  completed_at     DateTime?
+
+  @@index([round_channel_id])
+  @@index([team1_id])
+  @@index([team2_id])
+  @@index([status])
+}
+
+model audit_logs {
+  id               String   @id @default(cuid())
+  actor_discord_id String
+  action           String
+  entity_type      String
+  entity_id        String
+  previous_value   String?
+  new_value        String?
+  created_at       DateTime @default(now())
+
+  @@index([actor_discord_id])
+  @@index([entity_type])
+  @@index([entity_id])
+  @@index([created_at])
+}
+
+model player_selections {
+  id               String   @id @default(cuid())
+  discord_user_id  String
+  discord_username String
+  guild_id         String
+  team_id          String?
+  status           String   @default("awaiting_selection")
+  expiration       DateTime
+  created_at       DateTime @default(now())
+
+  @@index([discord_user_id])
+  @@index([status])
+}

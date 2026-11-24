@@ -1,0 +1,45 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+build/
+
+# Logs
+*.log
+logs/
+pids/
+*.pid
+*.seed
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+
+# Environment (keep .env.example committed)
+.env
+.env.local
+.env.*.local
+.env.test
+.env.production
+
+# SQLite databases
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+data/
+
+# Test / coverage output
+coverage/
+.jest-cache/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local exports
+exports/
+temp/
+tmp/
