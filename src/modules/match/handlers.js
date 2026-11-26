@@ -1,14 +1,15 @@
 import { MessageFlags } from 'discord.js';
 import config from '../../config/index.js';
 import logger from '../../utils/logger.js';
-import { createTranslator } from '../../utils/i18n.js';
+import { createTranslator, interactionLocale } from '../../utils/i18n.js';
 import {
   MatchModuleError,
   createBulkMatches,
   createMatch,
   recordResult,
-  toTeamRef,
+  resolveTeamPing,
 } from './service.js';
+import { listActiveTeams, resolveTeamRef as resolveTeamRefById } from './teams.js';
 import { createRepository } from './repository/index.js';
 import {
   createBulkSession,
@@ -67,11 +68,51 @@ async function updateError(interaction, locale, err) {
   );
 }
 
-async function resolveTeamName(interaction, userId) {
-  const member = await interaction.guild?.members.fetch(userId).catch(() => null);
-  if (member) return member.displayName;
-  const user = await interaction.client.users.fetch(userId).catch(() => null);
-  return user?.displayName || user?.globalName || user?.username || String(userId);
+async function resolveTeamName(_interaction, teamId) {
+  try {
+    const team = await resolveTeamRefById(teamId);
+    return team.name;
+  } catch {
+    return String(teamId);
+  }
+}
+
+/** Guild used for role lookups: the interaction's guild or the bot's first guild. */
+function interactionGuild(interaction) {
+  return interaction.guild ?? interaction.client?.guilds?.cache?.first?.() ?? null;
+}
+
+/**
+ * Resolve a team supplied as a command option (name or code) into a team ref.
+ * Missing or ambiguous teams become a localized module error. The Discord role
+ * (used for the intro ping) is resolved separately by `resolveTeamPing`.
+ */
+async function resolveTeamOption(interaction, optionName) {
+  const identifier = interaction.options.getString(optionName, true);
+  const team = await resolveTeamRefById(identifier).catch(() => null);
+  if (!team) throw new MatchModuleError('team_not_found', { team: identifier });
+  return team;
+}
+
+/** Fetch the active team catalog used by the bulk panel select menus. */
+async function loadTeams() {
+  return listActiveTeams({ limit: 25 });
+}
+
+async function showBulkPanel(interaction, locale, token, session) {
+  const teams = await loadTeams();
+  if (!teams.length) {
+    return interaction.reply({ content: t(locale, 'no_teams'), ...eph });
+  }
+  return interaction.reply({ ...buildBulkPanel({ locale, token, session, teams }), ...eph });
+}
+
+async function updateBulkPanel(interaction, locale, token, session) {
+  const teams = await loadTeams();
+  if (!teams.length) {
+    return updateError(interaction, locale, new MatchModuleError('no_teams'));
+  }
+  return interaction.update(buildBulkPanel({ locale, token, session, teams }));
 }
 
 /**
@@ -89,7 +130,7 @@ function resolveRoundChannel(interaction) {
 /* ------------------------------ commands -------------------------------- */
 
 async function handleMatchCreate(interaction, repository = defaultRepository) {
-  const locale = interaction.locale;
+  const locale = interactionLocale(interaction);
   try {
     if (!isCreator(interaction)) {
       return interaction.reply({ content: t(locale, 'role_gate_denied'), ...eph });
@@ -99,17 +140,27 @@ async function handleMatchCreate(interaction, repository = defaultRepository) {
       return interaction.reply({ content: t(locale, 'round_channel_required'), ...eph });
     }
 
-    const team1 = toTeamRef(interaction.options.getUser('team1', true));
-    const team2 = toTeamRef(interaction.options.getUser('team2', true));
+    const team1 = await resolveTeamOption(interaction, 'team1');
+    const team2 = await resolveTeamOption(interaction, 'team2');
     if (team1.id === team2.id) {
       return interaction.reply({ content: t(locale, 'self_match_error'), ...eph });
     }
 
+    // Resolve the Discord roles so the intro can ping both teams. When
+    // `require_role` is enabled (the default) a missing role aborts the match
+    // instead of silently falling back to a plain-name intro.
+    const requireRole = interaction.options?.getBoolean?.('require_role') ?? true;
+    const guild = interactionGuild(interaction);
+    const [pingedTeam1, pingedTeam2] = await Promise.all([
+      resolveTeamPing(team1, { guild, requireRole }),
+      resolveTeamPing(team2, { guild, requireRole }),
+    ]);
+
     await interaction.deferReply({ ...eph });
     const { thread } = await createMatch({
       roundChannel,
-      team1,
-      team2,
+      team1: pingedTeam1,
+      team2: pingedTeam2,
       locale,
       repository,
     });
@@ -127,7 +178,7 @@ async function handleMatchCreate(interaction, repository = defaultRepository) {
 }
 
 async function handleMatchCreateBulk(interaction) {
-  const locale = interaction.locale;
+  const locale = interactionLocale(interaction);
   try {
     if (!isCreator(interaction)) {
       return interaction.reply({ content: t(locale, 'role_gate_denied'), ...eph });
@@ -139,9 +190,10 @@ async function handleMatchCreateBulk(interaction) {
     const token = createBulkSession({
       userId: interaction.user.id,
       channelId: interaction.channel.id,
+      requireRole: interaction.options?.getBoolean?.('require_role') ?? true,
     });
     const session = getBulkSession(token);
-    return interaction.reply({ ...buildBulkPanel({ locale, token, session }), ...eph });
+    return showBulkPanel(interaction, locale, token, session);
   } catch (err) {
     logger.warn({ err }, 'match-create-bulk failed');
     return replyError(interaction, locale, err);
@@ -149,7 +201,7 @@ async function handleMatchCreateBulk(interaction) {
 }
 
 async function handleResultCommand(interaction, repository = defaultRepository) {
-  const locale = interaction.locale;
+  const locale = interactionLocale(interaction);
   try {
     if (!isMatchAdmin(interaction)) {
       return interaction.reply({ content: t(locale, 'admin_gate_denied'), ...eph });
@@ -197,7 +249,7 @@ export async function handleMatchCommand(interaction, repository = defaultReposi
 /* ----------------------------- components ------------------------------- */
 
 async function handleBulkComponent(interaction, sub, token) {
-  const locale = interaction.locale;
+  const locale = interactionLocale(interaction);
   if (!isCreator(interaction)) {
     return updateError(interaction, locale, new MatchModuleError('role_gate_denied'));
   }
@@ -210,24 +262,33 @@ async function handleBulkComponent(interaction, sub, token) {
   }
 
   if (sub === 't1' || sub === 't2') {
-    const userId = interaction.values?.[0];
-    if (!userId) return updateError(interaction, locale, new MatchModuleError('bulk_pick_both'));
-    const user = await interaction.client.users.fetch(userId).catch(() => null);
-    const ref = user ? toTeamRef(user) : { id: userId, name: String(userId) };
-    session.pending[sub === 't1' ? 'team1' : 'team2'] = ref;
+    const teamId = interaction.values?.[0];
+    if (!teamId) return updateError(interaction, locale, new MatchModuleError('bulk_pick_both'));
+    let ref;
+    try {
+      ref = await resolveTeamRefById(teamId);
+    } catch {
+      return updateError(interaction, locale, new MatchModuleError('team_not_found', { team: teamId }));
+    }
+    // Enrich with ping info from the guild so the intro can ping the team.
+    const enriched = await resolveTeamPing(ref, {
+      guild: interactionGuild(interaction),
+      requireRole: session.requireRole,
+    });
+    session.pending[sub === 't1' ? 'team1' : 'team2'] = enriched;
     session.notice = null;
-    return interaction.update(buildBulkPanel({ locale, token, session }));
+    return updateBulkPanel(interaction, locale, token, session);
   }
 
   if (sub === 'add') {
     const { team1, team2 } = session.pending;
     if (!team1 || !team2) {
       session.notice = t(locale, 'bulk_pick_both');
-      return interaction.update(buildBulkPanel({ locale, token, session }));
+      return updateBulkPanel(interaction, locale, token, session);
     }
     if (team1.id === team2.id) {
       session.notice = t(locale, 'bulk_pick_distinct');
-      return interaction.update(buildBulkPanel({ locale, token, session }));
+      return updateBulkPanel(interaction, locale, token, session);
     }
     const duplicate = session.pairs.some(
       (pair) =>
@@ -236,13 +297,13 @@ async function handleBulkComponent(interaction, sub, token) {
     );
     if (duplicate) {
       session.notice = t(locale, 'bulk_duplicate_pair');
-      return interaction.update(buildBulkPanel({ locale, token, session }));
+      return updateBulkPanel(interaction, locale, token, session);
     }
 
     session.pairs.push({ team1, team2 });
     session.pending = { team1: null, team2: null };
     session.notice = null;
-    return interaction.update(buildBulkPanel({ locale, token, session }));
+    return updateBulkPanel(interaction, locale, token, session);
   }
 
   if (sub === 'cancel') {
@@ -253,7 +314,7 @@ async function handleBulkComponent(interaction, sub, token) {
   if (sub === 'confirm') {
     if (!session.pairs.length) {
       session.notice = t(locale, 'bulk_empty');
-      return interaction.update(buildBulkPanel({ locale, token, session }));
+      return updateBulkPanel(interaction, locale, token, session);
     }
     await interaction.deferUpdate();
     const results = await createBulkMatches({
@@ -261,6 +322,8 @@ async function handleBulkComponent(interaction, sub, token) {
       pairs: session.pairs,
       locale,
       repository: defaultRepository,
+      guild: interactionGuild(interaction),
+      requireRole: session.requireRole,
     });
     deleteBulkSession(token);
     return interaction.editReply({
@@ -273,7 +336,7 @@ async function handleBulkComponent(interaction, sub, token) {
 }
 
 async function handleResultPick(interaction, threadId) {
-  const locale = interaction.locale;
+  const locale = interactionLocale(interaction);
   if (!isMatchAdmin(interaction)) {
     return interaction.reply({ content: t(locale, 'admin_gate_denied'), ...eph });
   }
@@ -314,7 +377,7 @@ async function handleResultPick(interaction, threadId) {
 }
 
 async function handleResultConfirm(interaction, token) {
-  const locale = interaction.locale;
+  const locale = interactionLocale(interaction);
   if (!isMatchAdmin(interaction)) {
     return interaction.reply({ content: t(locale, 'admin_gate_denied'), ...eph });
   }
@@ -358,7 +421,7 @@ async function handleResultConfirm(interaction, token) {
 }
 
 async function handleResultCancel(interaction, token) {
-  const locale = interaction.locale;
+  const locale = interactionLocale(interaction);
   if (!isMatchAdmin(interaction)) {
     return interaction.reply({ content: t(locale, 'admin_gate_denied'), ...eph });
   }

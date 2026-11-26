@@ -132,6 +132,18 @@ model audit_logs {
   @@index([created_at])
 }
 
+// Per-user bot preferences. Kept separate from `players` so a user can choose
+// their language before (or without) registering as a player.
+model user_settings {
+  id              String   @id @default(cuid())
+  discord_user_id String   @unique
+  locale          String   @default("en")
+  created_at      DateTime @default(now())
+  updated_at      DateTime @default(now()) @updatedAt
+
+  @@index([locale])
+}
+
 model player_selections {
   id               String   @id @default(cuid())
   discord_user_id  String

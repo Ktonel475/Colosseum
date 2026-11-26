@@ -69,23 +69,35 @@ export async function submitResult({
   score2,
   policy = config.resultConfirmationPolicy,
 }) {
-  if (!threadId) throw new ValidationError('This command must be used inside a match thread');
+  if (!threadId) {
+    throw new ValidationError('This command must be used inside a match thread', undefined, {
+      i18nKey: 'errors.thread_required',
+    });
+  }
 
   const match = await prisma.matches.findUnique({
     where: { discord_thread_id: threadId },
     include: { team1: true, team2: true },
   });
   if (!match) {
-    throw new ValidationError('This thread is not associated with a match');
+    throw new ValidationError('This thread is not associated with a match', undefined, {
+      i18nKey: 'errors.thread_not_match',
+    });
   }
   if (match.status !== 'active') {
-    throw new ConflictError('This match is closed');
+    throw new ConflictError('This match is closed', { i18nKey: 'errors.match_closed' });
   }
 
   const player = await prisma.players.findUnique({ where: { discord_user_id: discordUserId } });
-  if (!player) throw new ValidationError('You are not registered');
+  if (!player) {
+    throw new ValidationError('You are not registered', undefined, {
+      i18nKey: 'errors.player_not_registered',
+    });
+  }
   if (player.team_id !== match.team1_id && player.team_id !== match.team2_id) {
-    throw new ValidationError('You do not belong to either participating team');
+    throw new ValidationError('You do not belong to either participating team', undefined, {
+      i18nKey: 'errors.not_participating_team',
+    });
   }
 
   const s1 = parseScore(score1);
@@ -95,7 +107,9 @@ export async function submitResult({
     where: { match_id: match.id, status: { in: ['pending', 'final'] } },
   });
   if (existing) {
-    throw new ConflictError('A result has already been submitted for this match');
+    throw new ConflictError('A result has already been submitted for this match', {
+      i18nKey: 'errors.result_already_submitted',
+    });
   }
 
   const result = await prisma.results.create({
@@ -135,21 +149,41 @@ export async function confirmResult({ resultId, discordUserId, policy = config.r
     where: { id: resultId },
     include: { match: true, confirmations: true },
   });
-  if (!result) throw new NotFoundError('Result not found');
-  if (result.status === 'final') throw new ConflictError('Result is already final');
-  if (result.status === 'cancelled') throw new ConflictError('Result was cancelled');
-  if (policy === 'automatic') throw new ValidationError('This policy confirms results automatically');
+  if (!result) {
+    throw new NotFoundError('Result not found', { i18nKey: 'errors.result_not_found' });
+  }
+  if (result.status === 'final') {
+    throw new ConflictError('Result is already final', { i18nKey: 'errors.result_already_final' });
+  }
+  if (result.status === 'cancelled') {
+    throw new ConflictError('Result was cancelled', { i18nKey: 'errors.result_cancelled' });
+  }
+  if (policy === 'automatic') {
+    throw new ValidationError('This policy confirms results automatically', undefined, {
+      i18nKey: 'errors.automatic_policy',
+    });
+  }
 
   const player = await prisma.players.findUnique({ where: { discord_user_id: discordUserId } });
-  if (!player) throw new ValidationError('You are not registered');
+  if (!player) {
+    throw new ValidationError('You are not registered', undefined, {
+      i18nKey: 'errors.player_not_registered',
+    });
+  }
   if (player.team_id !== result.match.team1_id && player.team_id !== result.match.team2_id) {
-    throw new ValidationError('You do not belong to either participating team');
+    throw new ValidationError('You do not belong to either participating team', undefined, {
+      i18nKey: 'errors.not_participating_team',
+    });
   }
 
   const duplicate = await prisma.result_confirmations.findFirst({
     where: { result_id: resultId, discord_user_id: discordUserId },
   });
-  if (duplicate) throw new ConflictError('You have already confirmed this result');
+  if (duplicate) {
+    throw new ConflictError('You have already confirmed this result', {
+      i18nKey: 'errors.result_already_confirmed',
+    });
+  }
 
   await prisma.result_confirmations.create({
     data: {
@@ -171,9 +205,15 @@ export async function adminConfirmResult({ resultId, actorDiscordId, policy = co
     where: { id: resultId },
     include: { match: true },
   });
-  if (!result) throw new NotFoundError('Result not found');
-  if (result.status === 'final') throw new ConflictError('Result is already final');
-  if (result.status === 'cancelled') throw new ConflictError('Result was cancelled');
+  if (!result) {
+    throw new NotFoundError('Result not found', { i18nKey: 'errors.result_not_found' });
+  }
+  if (result.status === 'final') {
+    throw new ConflictError('Result is already final', { i18nKey: 'errors.result_already_final' });
+  }
+  if (result.status === 'cancelled') {
+    throw new ConflictError('Result was cancelled', { i18nKey: 'errors.result_cancelled' });
+  }
 
   const existing = await prisma.result_confirmations.findFirst({
     where: { result_id: resultId, discord_user_id: actorDiscordId },
@@ -202,7 +242,9 @@ async function evaluateConfirmation(resultId, { policy }) {
     where: { id: resultId },
     include: { match: true, confirmations: true },
   });
-  if (!result) throw new NotFoundError('Result not found');
+  if (!result) {
+    throw new NotFoundError('Result not found', { i18nKey: 'errors.result_not_found' });
+  }
 
   if (policy === 'administrator') {
     const adminConfirm = result.confirmations.find((c) => c.notes === 'administrator');
@@ -247,7 +289,9 @@ async function finalizeResult(resultId, actorDiscordId) {
 
 export async function editResult({ resultId, score1, score2, actorDiscordId }) {
   const result = await prisma.results.findUnique({ where: { id: resultId } });
-  if (!result) throw new NotFoundError('Result not found');
+  if (!result) {
+    throw new NotFoundError('Result not found', { i18nKey: 'errors.result_not_found' });
+  }
 
   const s1 = parseScore(score1);
   const s2 = parseScore(score2);
@@ -271,11 +315,25 @@ export async function editResult({ resultId, score1, score2, actorDiscordId }) {
 
 export async function cancelResult({ resultId, actorDiscordId, isAdmin = false, requesterId }) {
   const result = await prisma.results.findUnique({ where: { id: resultId } });
-  if (!result) throw new NotFoundError('Result not found');
-  if (result.status === 'final') throw new ConflictError('Final results cannot be cancelled');
-  if (result.status === 'cancelled') throw new ConflictError('Result is already cancelled');
+  if (!result) {
+    throw new NotFoundError('Result not found', { i18nKey: 'errors.result_not_found' });
+  }
+  if (result.status === 'final') {
+    throw new ConflictError('Final results cannot be cancelled', {
+      i18nKey: 'errors.final_result_not_cancellable',
+    });
+  }
+  if (result.status === 'cancelled') {
+    throw new ConflictError('Result is already cancelled', {
+      i18nKey: 'errors.result_already_cancelled',
+    });
+  }
   if (!isAdmin && result.submitted_by !== requesterId) {
-    throw new AppError('You cannot cancel this submission', { status: 403, code: 'FORBIDDEN' });
+    throw new AppError('You cannot cancel this submission', {
+      status: 403,
+      code: 'FORBIDDEN',
+      i18nKey: 'errors.cannot_cancel_submission',
+    });
   }
 
   const updated = await prisma.results.update({
@@ -302,15 +360,23 @@ export async function cancelResult({ resultId, actorDiscordId, isAdmin = false, 
 
 /**
  * Return a human-readable summary of remaining confirmations.
+ *
+ * @param {string} resultId
+ * @param {string} [policy]
+ * @param {string} [locale] user locale for the returned text (defaults to English)
  */
-export async function describeConfirmationStatus(resultId, policy = config.resultConfirmationPolicy) {
-  if (policy === 'automatic') return 'Automatically confirmed on submission';
-  if (policy === 'administrator') return 'Awaiting administrator confirmation';
+export async function describeConfirmationStatus(
+  resultId,
+  policy = config.resultConfirmationPolicy,
+  locale = 'en',
+) {
+  if (policy === 'automatic') return t(locale, 'result_status.automatic');
+  if (policy === 'administrator') return t(locale, 'result_status.administrator');
   const result = await prisma.results.findUnique({
     where: { id: resultId },
     include: { match: true, confirmations: true },
   });
-  if (!result) return 'Unknown';
+  if (!result) return t(locale, 'result_status.unknown');
   const confirmerIds = result.confirmations
     .filter((c) => c.confirmation_status === 'confirmed')
     .map((c) => c.discord_user_id);
@@ -320,10 +386,12 @@ export async function describeConfirmationStatus(resultId, policy = config.resul
   const teams = new Set(players.map((p) => p.team_id));
   const need1 = !teams.has(result.match.team1_id);
   const need2 = !teams.has(result.match.team2_id);
-  if (!need1 && !need2) return 'All required team confirmations received';
+  if (!need1 && !need2) return t(locale, 'result_status.all_received');
   const missing = [need1 ? result.match.team1_id : null, need2 ? result.match.team2_id : null].filter(Boolean);
   const teamNames = await prisma.teams.findMany({ where: { team_id: { in: missing } } });
-  return `Awaiting confirmation from: ${teamNames.map((t) => t.team_name).join(', ')}`;
+  return t(locale, 'result_status.awaiting', {
+    teams: teamNames.map((team) => team.team_name).join(', '),
+  });
 }
 
 export default {

@@ -57,6 +57,10 @@ Three capabilities are implemented:
   `/repick-team` without the option for the message-based search.
   When `MATCH_MODULE_ONLY=true`, the automatic newcomer DM is skipped; `/regist`,
   `/repick-team` and every other command keep working as usual.
+- The bot speaks **English and Thai only**. `/language language:<English|ไทย>`
+  saves a per-user preference. Every interaction uses that preference first,
+  then the Discord client locale (`interaction.locale`), then English. The
+  newcomer welcome DM uses the saved preference or the guild's preferred locale.
 - **Development shortcut:** `/init target:<@user>` selects a user with Discord's
   native **User option** (on-server or off-server) and uses the selected user's ID
   as the immutable identifier — never a typed username. It resets that user to the
@@ -69,16 +73,20 @@ Three capabilities are implemented:
 
 **Match and result management (extractable module: `src/modules/match`)**
 
-- `/match-create [channel] team1:@user team2:@user` creates one private thread in
-  the chosen **round channel** (or the current channel when `channel` is omitted),
-  so a single server can host many independent round channels. Teams are selected
-  with Discord's native User option and stored by immutable user ID. The thread name
-  comes from the locale template (`{team1} vs {team2}` in English,
-  `{team1} พบ {team2}` in Thai).
-- `/match-create-bulk` opens an ephemeral panel with two user pickers. Add as many
-  pairings as needed, then **Create matches** to create all threads in the round
-  in one flow. Each pair is validated independently and the summary lists success
-  or failure per pairing.
+- `/match-create [channel] team1 team2 [require_role]` creates one private thread
+  in the chosen **round channel** (or the current channel when `channel` is
+  omitted), so a single server can host many independent round channels. Teams
+  are selected by **team name or team code** (`team_id`) with autocomplete. By
+  default (`require_role:true`) each team must have a matching Discord role, and
+  the intro message pings both destination roles with a real `<@&roleId>`
+  mention. Pass `require_role:false` to allow a plain-name intro when a role is
+  missing. The thread name comes from the locale template (`{team1} vs {team2}`
+  in English, `{team1} พบ {team2}` in Thai).
+- `/match-create-bulk [require_role]` opens an ephemeral panel with two team
+  pickers. Add as many pairings as needed, then **Create matches** to create all
+  threads in the round in one flow. Each pair is validated independently and the
+  summary lists success or failure per pairing. The same `require_role` behavior
+  applies to every thread.
 - `/result` is admin-only and works **only inside a module match thread** (the
   thread ID is resolved from `interaction.channel`, never from an argument). The
   admin picks the winner, then confirms with a button; only the same admin who
@@ -302,9 +310,10 @@ alone are never trusted.
 | `/myteam` | Everyone | Show your team |
 | `/regist [teamname]` | Everyone | Register and pick a team by name/code, or run without the option for message search → confirm |
 | `/repick-team [teamname]` | Everyone | Change team by name/code, or run without the option for message search → confirm |
+| `/language language` | Everyone | Choose the bot language: English or Thai. Saved per Discord user |
 | `/init target:@user` | Dev only | Reset the selected user to the initial player state (no team) and resend the welcome DM; enabled by `ENABLE_DEV_COMMANDS` |
-| `/match-create [channel] team1 team2` | Admin role | Create one private match thread in the selected round channel (defaults to the current channel; User options for teams) |
-| `/match-create-bulk` | Admin role | Assemble N pairings in a panel and create all threads |
+| `/match-create [channel] team1 team2 [require_role]` | Admin role | Create one private match thread in the selected round channel, pinging both team roles (defaults to the current channel; autocomplete for team name/code) |
+| `/match-create-bulk [require_role]` | Admin role | Assemble N pairings in a panel and create all threads, pinging each team role |
 | `/match-list [status]` | Everyone | List matches (legacy team-code subsystem) |
 | `/match-info [match]` | Everyone | Match details (or current thread) |
 | `/match-close [match]` | Admin | Close match and delete its private thread |
@@ -587,6 +596,10 @@ templates/teams-template.xlsx  # Excel import template
   `/repick-team` name is missing/ambiguous), the bot keeps the loop open instead
   of failing; a **Search again** button on the confirmation step discards the
   pending selection and restarts the search.
+- **Language resolution.** Preferred strings live in `src/locales/{en,th}.json`.
+  `src/services/languageService.js` stores each user's choice in `user_settings`
+  (independent of player registration) and resolves it with the Discord client
+  locale as fallback. Handlers read the resolved value from `interaction.userLocale`.
 - **Extractable match module.** `src/modules/match` owns `/match-create`,
   `/match-create-bulk` and `/result`. It reads env only through `config.match`
   and `config.discord.adminRoleId`, persists via a repository interface

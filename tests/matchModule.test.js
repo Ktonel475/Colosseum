@@ -1,5 +1,5 @@
 import prisma from '../src/database/prisma.js';
-import { resetDb } from './helpers.js';
+import { makeGuild, resetDb, seedTeams } from './helpers.js';
 import { createTranslator, preloadLocales, resolveLocale, t } from '../src/utils/i18n.js';
 import { matchCommandDefinitions } from '../src/modules/match/commands.js';
 import {
@@ -14,7 +14,10 @@ import { handleMatchCommand, handleMatchComponent } from '../src/modules/match/h
 import { LEGACY_MATCH_COMMANDS, applyMatchModuleMode } from '../src/bot/registerCommands.js';
 
 beforeAll(() => preloadLocales());
-beforeEach(resetDb);
+beforeEach(async () => {
+  await resetDb();
+  await seedTeams();
+});
 afterAll(async () => prisma.$disconnect());
 
 function makeRoundChannel(id = 'round-1') {
@@ -59,7 +62,7 @@ function makeInteraction(overrides = {}) {
       channels: { fetch: async () => null },
     },
     values: [],
-    options: { getUser: () => null },
+    options: { getUser: () => null, getString: () => null },
     ...overrides,
   };
   interaction.reply = async (payload) => {
@@ -93,6 +96,20 @@ function withRoles(...roleIds) {
 
 function threadChannel(id = 'thread-1') {
   return { id, isThread: () => true };
+}
+
+/* Team roles used by the /match-create ping tests. */
+const TEAM_ROLE_IDS = {
+  'Team Alpha': '111111111111111111',
+  'Team Bravo': '222222222222222222',
+  'Team Charlie': '333333333333333333',
+  'Team Delta': '444444444444444444',
+};
+
+function teamGuild() {
+  return makeGuild({
+    roles: Object.entries(TEAM_ROLE_IDS).map(([name, id]) => ({ id, name })),
+  });
 }
 
 describe('project i18n', () => {
@@ -169,14 +186,22 @@ describe('match module commands', () => {
     ]);
 
     const create = definitions.find((c) => c.name === 'match-create');
-    expect(create.options.map((o) => o.name)).toEqual(['team1', 'team2', 'channel']);
+    expect(create.options.map((o) => o.name)).toEqual([
+      'team1',
+      'team2',
+      'require_role',
+      'channel',
+    ]);
 
     const channelOption = create.options.find((o) => o.name === 'channel');
     expect(channelOption).toMatchObject({ type: 7, required: false });
     expect(channelOption.channel_types).toEqual([0, 5]); // GuildText, GuildAnnouncement
 
-    const userOptions = create.options.filter((o) => o.type === 6).map((o) => o.name);
-    expect(userOptions).toEqual(['team1', 'team2']);
+    const teamOptions = create.options.filter((o) => o.name === 'team1' || o.name === 'team2');
+    expect(teamOptions.map((o) => o.name)).toEqual(['team1', 'team2']);
+    for (const option of teamOptions) {
+      expect(option).toMatchObject({ type: 3, required: true, autocomplete: true });
+    }
   });
 });
 
@@ -278,11 +303,11 @@ describe('match service', () => {
     expect(record.status).toBe('active');
 
     const completed = await repository.complete('thread-db', {
-      result: { winner: 'team1', winnerId: 'u1' },
+      result: { winner: 'team1', winnerId: 'T001' },
       completedAt: new Date(),
     });
     expect(completed.status).toBe('completed');
-    expect(completed.result).toEqual({ winner: 'team1', winnerId: 'u1' });
+    expect(completed.result).toEqual({ winner: 'team1', winnerId: 'T001' });
     expect(await repository.listByRound('round-db')).toHaveLength(1);
   });
 });
@@ -293,7 +318,7 @@ describe('match command handlers', () => {
       locale: 'th',
       channel: makeRoundChannel(),
       options: {
-        getUser: (name) => ({ id: name === 'team1' ? 'u1' : 'u2', username: name }),
+        getString: (name) => (name === 'team1' ? 'T001' : 'T002'),
       },
     });
     await handleMatchCommand(state.interaction);
@@ -304,33 +329,109 @@ describe('match command handlers', () => {
     const state = makeInteraction({
       member: withRoles('role-admin'),
       channel: makeRoundChannel(),
-      options: { getUser: () => ({ id: 'u1', username: 'same' }) },
+      options: { getString: () => 'T001' },
     });
     await handleMatchCommand(state.interaction);
     expect(state.replies[0].content).toBe(t('en', 'match.self_match_error'));
   });
 
-  test('creates a thread via /match-create', async () => {
+  test('rejects an unknown team name', async () => {
+    const state = makeInteraction({
+      member: withRoles('role-admin'),
+      channel: makeRoundChannel(),
+      options: {
+        getString: (name) => (name === 'team1' ? 'T001' : 'Missing Team'),
+      },
+    });
+    await handleMatchCommand(state.interaction);
+    expect(state.replies[0].content).toBe(
+      t('en', 'match.team_not_found', { team: 'Missing Team' }),
+    );
+  });
+
+  test('creates a thread via /match-create from team names and pings both roles', async () => {
     const channel = makeRoundChannel();
     const state = makeInteraction({
       member: withRoles('role-admin'),
       channel,
+      guild: teamGuild(),
       options: {
-        getUser: (name) =>
-          name === 'team1'
-            ? { id: 'u1', username: 'alice', displayName: 'Alice' }
-            : { id: 'u2', username: 'bob', displayName: 'Bob' },
+        getString: (name) => (name === 'team1' ? 'Team Alpha' : 'T002'),
+        getBoolean: () => true,
       },
     });
     await handleMatchCommand(state.interaction);
 
     expect(channel.created).toHaveLength(1);
-    expect(channel.created[0].name).toBe('Alice vs Bob');
+    expect(channel.created[0].name).toBe('Team Alpha vs Team Bravo');
     expect(state.edits[0]).toContain('<#thread-1>');
+
+    // The intro message must ping the destination team roles, not just names.
+    const intro = channel.created[0].messages[0];
+    expect(intro).toContain(`<@&${TEAM_ROLE_IDS['Team Alpha']}>`);
+    expect(intro).toContain(`<@&${TEAM_ROLE_IDS['Team Bravo']}>`);
 
     const repository = new PrismaMatchRepository();
     const saved = await repository.findByThreadId('thread-1');
-    expect(saved).toMatchObject({ team1Id: 'u1', team2Id: 'u2' });
+    expect(saved).toMatchObject({ team1Id: 'T001', team2Id: 'T002' });
+  });
+
+  test('pings roles when require_role is explicitly enabled', async () => {
+    const channel = makeRoundChannel();
+    const state = makeInteraction({
+      member: withRoles('role-admin'),
+      channel,
+      guild: teamGuild(),
+      options: {
+        getString: (name) => (name === 'team1' ? 'T001' : 'T002'),
+        getBoolean: (name) => (name === 'require_role' ? true : null),
+      },
+    });
+    await handleMatchCommand(state.interaction);
+
+    expect(channel.created).toHaveLength(1);
+    const intro = channel.created[0].messages[0];
+    expect(intro).toContain(`<@&${TEAM_ROLE_IDS['Team Alpha']}>`);
+    expect(intro).toContain(`<@&${TEAM_ROLE_IDS['Team Bravo']}>`);
+  });
+
+  test('rejects the match when require_role is enabled and a role is missing', async () => {
+    const channel = makeRoundChannel();
+    const state = makeInteraction({
+      member: withRoles('role-admin'),
+      channel,
+      guild: makeGuild({ roles: [{ id: '111111111111111111', name: 'Team Alpha' }] }),
+      options: {
+        getString: (name) => (name === 'team1' ? 'T001' : 'T002'),
+        getBoolean: () => true,
+      },
+    });
+    await handleMatchCommand(state.interaction);
+
+    expect(channel.created).toHaveLength(0);
+    expect(state.replies[0].content).toBe(
+      t('en', 'match.team_role_not_found', { team: 'Team Bravo' }),
+    );
+  });
+
+  test('allows a plain-name intro when require_role is disabled', async () => {
+    const channel = makeRoundChannel();
+    const state = makeInteraction({
+      member: withRoles('role-admin'),
+      channel,
+      guild: makeGuild({ roles: [] }),
+      options: {
+        getString: (name) => (name === 'team1' ? 'T001' : 'T002'),
+        getBoolean: (name) => (name === 'require_role' ? false : null),
+      },
+    });
+    await handleMatchCommand(state.interaction);
+
+    expect(channel.created).toHaveLength(1);
+    const intro = channel.created[0].messages[0];
+    expect(intro).toContain('Team Alpha');
+    expect(intro).toContain('Team Bravo');
+    expect(intro).not.toContain('<@&');
   });
 
   test('uses the channel option instead of the current channel', async () => {
@@ -339,12 +440,11 @@ describe('match command handlers', () => {
     const state = makeInteraction({
       member: withRoles('role-admin'),
       channel: current,
+      guild: teamGuild(),
       options: {
         getChannel: (name) => (name === 'channel' ? selected : null),
-        getUser: (name) =>
-          name === 'team1'
-            ? { id: 'u1', username: 'alice', displayName: 'Alice' }
-            : { id: 'u2', username: 'bob', displayName: 'Bob' },
+        getString: (name) => (name === 'team1' ? 'T001' : 'T002'),
+        getBoolean: () => true,
       },
     });
 
@@ -364,7 +464,7 @@ describe('match command handlers', () => {
       channel: makeRoundChannel(),
       options: {
         getChannel: () => selected,
-        getUser: (name) => ({ id: name === 'team1' ? 'u1' : 'u2', username: name }),
+        getString: (name) => (name === 'team1' ? 'T001' : 'T002'),
       },
     });
 
@@ -372,22 +472,30 @@ describe('match command handlers', () => {
     expect(state.replies[0].content).toBe(t('en', 'match.round_channel_required'));
   });
 
-  test('bulk panel creates N threads in one flow', async () => {
+  test('bulk panel creates N threads from team names in one flow', async () => {
+    await prisma.teams.create({
+      data: { team_id: 'T003', team_name: 'Team Charlie', game_type: 'Game B' },
+    });
+    await prisma.teams.create({
+      data: { team_id: 'T004', team_name: 'Team Delta', game_type: 'Game B' },
+    });
     const channel = makeRoundChannel();
     const panel = makeInteraction({
       commandName: 'match-create-bulk',
       member: withRoles('role-admin'),
       channel,
+      guild: teamGuild(),
     });
     await handleMatchCommand(panel.interaction);
     const token = panel.replies[0].components[0].components[0].data.custom_id.split(':')[3];
 
-    const pick = async (team, userId) => {
+    const pick = async (team, teamId) => {
       const state = makeInteraction({
         member: withRoles('role-admin'),
         channel,
+        guild: teamGuild(),
         customId: `matchmod:bulk:${team}:${token}`,
-        values: [userId],
+        values: [teamId],
       });
       await handleMatchComponent(state.interaction);
       return state;
@@ -397,19 +505,20 @@ describe('match command handlers', () => {
       const state = makeInteraction({
         member: withRoles('role-admin'),
         channel,
+        guild: teamGuild(),
         customId: `matchmod:bulk:${action}:${token}`,
       });
       await handleMatchComponent(state.interaction);
       return state;
     };
 
-    await pick('t1', 'u1');
-    await pick('t2', 'u2');
+    await pick('t1', 'T001');
+    await pick('t2', 'T002');
     await click('add');
-    await pick('t1', 'u3');
-    await pick('t2', 'u4');
+    await pick('t1', 'T003');
+    await pick('t2', 'T004');
     const added = await click('add');
-    expect(added.updates.at(-1).content).toContain('u3');
+    expect(added.updates.at(-1).content).toContain('Team Charlie');
 
     const confirmed = await click('confirm');
     expect(channel.created).toHaveLength(2);
@@ -426,8 +535,8 @@ describe('result flow', () => {
     await repository.create({
       roundChannelId: 'round-1',
       threadId: 'thread-1',
-      team1Id: 'u1',
-      team2Id: 'u2',
+      team1Id: 'T001',
+      team2Id: 'T002',
     });
     return repository;
   }
@@ -476,7 +585,7 @@ describe('result flow', () => {
     });
     await handleMatchCommand(command.interaction);
     expect(command.replies[0].content).toBe(
-      t('en', 'match.winner_prompt', { team1: 'User u1', team2: 'User u2' }),
+      t('en', 'match.winner_prompt', { team1: 'Team Alpha', team2: 'Team Bravo' }),
     );
 
     const pick = makeInteraction({
@@ -488,7 +597,7 @@ describe('result flow', () => {
     });
     await handleMatchComponent(pick.interaction);
     const confirmPayload = pick.updates[0];
-    expect(confirmPayload.content).toContain('User u1');
+    expect(confirmPayload.content).toContain('Team Alpha');
     const token = confirmPayload.components[0].components[0].data.custom_id.split(':')[3];
 
     const otherAdmin = makeInteraction({
@@ -514,7 +623,7 @@ describe('result flow', () => {
 
     const saved = await repository.findByThreadId('thread-1');
     expect(saved.status).toBe('completed');
-    expect(saved.result).toMatchObject({ winner: 'team1', winnerId: 'u1', decidedBy: 'admin-1' });
+    expect(saved.result).toMatchObject({ winner: 'team1', winnerId: 'T001', decidedBy: 'admin-1' });
   });
 
   test('cancel dismisses without completing the match', async () => {

@@ -20,12 +20,13 @@ setInterval(() => {
 
 /* ------------------------------- bulk ----------------------------------- */
 
-export function createBulkSession({ userId, channelId }) {
+export function createBulkSession({ userId, channelId, requireRole = true }) {
   const token = randomUUID();
   bulkSessions.set(token, {
     token,
     userId,
     channelId,
+    requireRole: Boolean(requireRole),
     pairs: [],
     pending: { team1: null, team2: null },
     notice: null,

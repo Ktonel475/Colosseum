@@ -4,7 +4,6 @@ import {
   ButtonStyle,
   EmbedBuilder,
   StringSelectMenuBuilder,
-  UserSelectMenuBuilder,
 } from 'discord.js';
 import { createTranslator } from '../../utils/i18n.js';
 
@@ -31,21 +30,30 @@ function pairLines(locale, session) {
   return lines.join('\n');
 }
 
-/** Build the ephemeral bulk-creation panel with two user pickers. */
-export function buildBulkPanel({ locale, token, session }) {
-  const team1Select = new UserSelectMenuBuilder()
+function teamOptions({ teams, selectedId }) {
+  return teams.slice(0, MAX_PANEL_PAIRS).map((team) => ({
+    label: `${team.team_name} (${team.team_id})`.slice(0, 100),
+    description: team.game_type ? String(team.game_type).slice(0, 100) : undefined,
+    value: team.team_id,
+    default: team.team_id === selectedId,
+  }));
+}
+
+/** Build the ephemeral bulk-creation panel with two team pickers. */
+export function buildBulkPanel({ locale, token, session, teams = [] }) {
+  const team1Select = new StringSelectMenuBuilder()
     .setCustomId(`${CUSTOM_ID_PREFIX}:bulk:t1:${token}`)
     .setPlaceholder(t(locale, 'bulk_pick_team1'))
     .setMinValues(1)
-    .setMaxValues(1);
-  if (session.pending.team1) team1Select.setDefaultUsers([session.pending.team1.id]);
+    .setMaxValues(1)
+    .addOptions(teamOptions({ teams, selectedId: session.pending.team1?.id }));
 
-  const team2Select = new UserSelectMenuBuilder()
+  const team2Select = new StringSelectMenuBuilder()
     .setCustomId(`${CUSTOM_ID_PREFIX}:bulk:t2:${token}`)
     .setPlaceholder(t(locale, 'bulk_pick_team2'))
     .setMinValues(1)
-    .setMaxValues(1);
-  if (session.pending.team2) team2Select.setDefaultUsers([session.pending.team2.id]);
+    .setMaxValues(1)
+    .addOptions(teamOptions({ teams, selectedId: session.pending.team2?.id }));
 
   const addButton = new ButtonBuilder()
     .setCustomId(`${CUSTOM_ID_PREFIX}:bulk:add:${token}`)

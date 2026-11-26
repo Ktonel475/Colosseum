@@ -17,7 +17,9 @@ import { parseTeamWorkbook, validateTeamRows } from '../../imports/excelImport.j
 import { sendWelcome } from '../welcome.js';
 import { splitMessage } from '../../utils/message.js';
 import { formatTable, formatTableMessages, containsWideChars } from '../../utils/table.js';
-import { NotFoundError, ValidationError } from '../../utils/errors.js';
+import { NotFoundError, ValidationError, errorMessage } from '../../utils/errors.js';
+import { tUser, interactionLocale } from '../../utils/i18n.js';
+import * as languageService from '../../services/languageService.js';
 import {
   matchCommandNames,
   handleMatchCommand,
@@ -32,6 +34,11 @@ import {
   consumePendingImport,
   cancelPendingImport,
 } from './state.js';
+
+/** Translate a bot string using the interaction's resolved user language. */
+function tr(interaction, key, params) {
+  return tUser(interaction, key, params);
+}
 
 export function isAdmin(interaction) {
   if (!interaction.inGuild?.()) return false;
@@ -65,11 +72,11 @@ function teamRoleMention(team) {
   return team.discord_role_id ? `<@&${team.discord_role_id}>` : `**${team.team_name}**`;
 }
 
-function resultConfirmRow(resultId) {
+function resultConfirmRow(interaction, resultId) {
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setCustomId(`result:confirm:${resultId}`)
-      .setLabel('Confirm result')
+      .setLabel(tr(interaction, 'bot.result.confirm_button'))
       .setStyle(ButtonStyle.Success),
   );
 }
@@ -96,15 +103,33 @@ async function announceFinalResult(interaction, ctx, resultId) {
   const content =
     `${teamRoleMention(match.team1)} ${teamRoleMention(match.team2)}` +
     `${userPings ? ` ${userPings}` : ''}\n` +
-    `**Final result:** ${match.team1.team_name} **${result.score1} - ${result.score2}** ${match.team2.team_name}`;
+    tr(interaction, 'bot.result.final_content', {
+      team1: match.team1.team_name,
+      score1: result.score1,
+      score2: result.score2,
+      team2: match.team2.team_name,
+    });
 
   const embed = new EmbedBuilder()
-    .setTitle('Result confirmed')
+    .setTitle(tr(interaction, 'bot.result.confirmed_title'))
     .setColor(0x2ecc71)
     .addFields(
-      { name: `Team 1 — ${match.team1.team_name}`, value: String(result.score1), inline: true },
-      { name: `Team 2 — ${match.team2.team_name}`, value: String(result.score2), inline: true },
-      { name: 'Submitted by', value: result.submitted_by ? `<@${result.submitted_by}>` : 'Unknown' },
+      {
+        name: tr(interaction, 'bot.result.team1_field', { team: match.team1.team_name }),
+        value: String(result.score1),
+        inline: true,
+      },
+      {
+        name: tr(interaction, 'bot.result.team2_field', { team: match.team2.team_name }),
+        value: String(result.score2),
+        inline: true,
+      },
+      {
+        name: tr(interaction, 'bot.result.submitted_by'),
+        value: result.submitted_by
+          ? `<@${result.submitted_by}>`
+          : tr(interaction, 'bot.result.unknown'),
+      },
     );
 
   const payload = { content, embeds: [embed] };
@@ -167,11 +192,13 @@ async function replyMessages(interaction, messages, { ephemeral = true } = {}) {
   }
 }
 
-const WIDE_NOTE = 'Note: Thai/CJK/emoji widths may make columns drift slightly; short labels align best.';
+function wideNote(interaction) {
+  return tr(interaction, 'common.wide_note');
+}
 
 function adminOnly(interaction) {
   if (isAdmin(interaction)) return false;
-  const message = 'You do not have permission to use this command.';
+  const message = tr(interaction, 'common.permission_denied');
   if (interaction.deferred || interaction.replied) {
     interaction.editReply({ content: message }).catch(() => {});
   } else {
@@ -184,6 +211,10 @@ function adminOnly(interaction) {
 
 export async function handleInteraction(interaction, ctx) {
   try {
+    // Resolve the language once per interaction: saved user preference first,
+    // then the Discord client locale. Every handler reads `interaction.userLocale`.
+    interaction.userLocale = await languageService.resolveInteractionLocale(interaction);
+
     if (interaction.isAutocomplete()) return await handleAutocomplete(interaction);
     if (interaction.isChatInputCommand()) {
       if (matchCommandNames.has(interaction.commandName)) {
@@ -203,7 +234,7 @@ export async function handleInteraction(interaction, ctx) {
     if (interaction.isButton()) return await handleButton(interaction, ctx);
   } catch (err) {
     logger.error({ err, type: interaction.type }, 'Interaction handler error');
-    const payload = { content: err.message || 'An unexpected error occurred.', ...eph };
+    const payload = { content: errorMessage(interactionLocale(interaction), err), ...eph };
     if (interaction.deferred || interaction.replied) {
       await interaction.followUp(payload).catch(() => {});
     } else {
@@ -217,6 +248,28 @@ export async function handleInteraction(interaction, ctx) {
 async function handleAutocomplete(interaction) {
   const focused = interaction.options.getFocused(true);
   const query = String(focused.value ?? '').toLowerCase();
+
+  if (
+    interaction.commandName === 'match-create' &&
+    (focused.name === 'team1' || focused.name === 'team2')
+  ) {
+    const teams = await teamService.listTeams({});
+    const matches = teams
+      .filter((team) =>
+        `${team.team_id} ${team.team_name} ${team.game_type ?? ''}`
+          .toLowerCase()
+          .includes(query),
+      )
+      .slice(0, 25)
+      .map((team) => ({
+        name: `${team.team_name} (${team.team_id})${team.game_type ? ` • ${team.game_type}` : ''}`.slice(
+          0,
+          100,
+        ),
+        value: team.team_id,
+      }));
+    return interaction.respond(matches);
+  }
 
   if (interaction.commandName === 'regist' || interaction.commandName === 'repick-team') {
     const teams = await teamService.listTeams({});
@@ -280,6 +333,8 @@ async function handleCommand(interaction, ctx) {
       return handleTeamSync(interaction, ctx);
     case 'myteam':
       return handleMyTeam(interaction);
+    case 'language':
+      return handleLanguage(interaction);
     case 'init':
       return handleInit(interaction);
     case 'regist':
@@ -301,8 +356,24 @@ async function handleCommand(interaction, ctx) {
     case 'result-cancel':
       return handleResultCancel(interaction, ctx);
     default:
-      return interaction.reply({ content: 'Unknown command.', ...eph });
+      return interaction.reply({ content: tr(interaction, 'common.command_unknown'), ...eph });
   }
+}
+
+/**
+ * `/language` — persist the user's language choice. The command sets the
+ * preference, then answers in the newly selected language.
+ */
+async function handleLanguage(interaction) {
+  const requested = interaction.options.getString('language', true);
+  const saved = await languageService.setUserLocale(interaction.user.id, requested);
+  interaction.userLocale = saved.locale;
+  return interaction.reply({
+    content: tr(interaction, 'bot.language.saved', {
+      language: tr(interaction, `language.${saved.locale}`),
+    }),
+    ...eph,
+  });
 }
 
 async function handleTeamImport(interaction, ctx) {
@@ -311,21 +382,21 @@ async function handleTeamImport(interaction, ctx) {
 
   const attachment = interaction.options.getAttachment('file', true);
   if (!/\.xlsx$/i.test(attachment.name)) {
-    return interaction.editReply('Please upload a valid .xlsx file.');
+    return interaction.editReply(tr(interaction, 'bot.team_import.invalid_file'));
   }
   if (attachment.size > config.maxFileSize) {
-    return interaction.editReply('File is too large.');
+    return interaction.editReply(tr(interaction, 'bot.team_import.file_too_large'));
   }
 
   const res = await fetch(attachment.url);
-  if (!res.ok) return interaction.editReply('Could not download the uploaded file.');
+  if (!res.ok) return interaction.editReply(tr(interaction, 'bot.team_import.download_failed'));
   const buffer = Buffer.from(await res.arrayBuffer());
 
   const { rows, errors } = await parseTeamWorkbook(buffer);
   const rowErrors = [...errors, ...validateTeamRows(rows)];
   if (rowErrors.length) {
     const text =
-      'Import rejected:\n' +
+      tr(interaction, 'bot.team_import.rejected') +
       rowErrors
         .slice(0, 50)
         .map((e) => `• ${e}`)
@@ -341,32 +412,55 @@ async function handleTeamImport(interaction, ctx) {
   });
 
   const embed = new EmbedBuilder()
-    .setTitle('Team import preview')
+    .setTitle(tr(interaction, 'bot.team_import.preview_title'))
     .setColor(0x2ecc71)
     .addFields(
-      { name: 'Valid rows', value: String(preview.counts.incoming), inline: true },
-      { name: 'New', value: String(preview.counts.new), inline: true },
-      { name: 'Updated', value: String(preview.counts.updated), inline: true },
-      { name: 'Deactivated', value: String(preview.counts.removed), inline: true },
+      {
+        name: tr(interaction, 'bot.team_import.valid_rows'),
+        value: String(preview.counts.incoming),
+        inline: true,
+      },
+      { name: tr(interaction, 'bot.team_import.new'), value: String(preview.counts.new), inline: true },
+      {
+        name: tr(interaction, 'bot.team_import.updated'),
+        value: String(preview.counts.updated),
+        inline: true,
+      },
+      {
+        name: tr(interaction, 'bot.team_import.deactivated'),
+        value: String(preview.counts.removed),
+        inline: true,
+      },
     )
-    .setFooter({ text: 'Confirm within 5 minutes. Deactivation keeps historical data.' });
+    .setFooter({ text: tr(interaction, 'bot.team_import.footer') });
 
   const blocks = [];
+  const tableHeaders = () => [
+    tr(interaction, 'table.name'),
+    tr(interaction, 'table.code'),
+    tr(interaction, 'table.game_type'),
+  ];
   const pushGroup = (label, list) => {
     if (!list.length) return;
-    const rows = list.map((t) => [t.team_name, t.team_id, t.game_type ?? '-']);
-    const messages = formatTableMessages(['Name', 'Code', 'Game type'], rows);
+    const rows = list.map((team) => [team.team_name, team.team_id, team.game_type ?? '-']);
+    const messages = formatTableMessages(tableHeaders(), rows);
     messages.forEach((message, index) => {
       blocks.push(index === 0 ? `**${label}**\n${message}` : message);
     });
   };
-  pushGroup('New', preview.newTeams);
-  pushGroup('Updated', preview.updatedTeams);
-  pushGroup('Deactivated', preview.removedTeams);
+  pushGroup(tr(interaction, 'bot.team_import.new'), preview.newTeams);
+  pushGroup(tr(interaction, 'bot.team_import.updated'), preview.updatedTeams);
+  pushGroup(tr(interaction, 'bot.team_import.deactivated'), preview.removedTeams);
 
   const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId(`import:confirm:${token}`).setLabel('Confirm import').setStyle(ButtonStyle.Success),
-    new ButtonBuilder().setCustomId(`import:cancel:${token}`).setLabel('Cancel').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId(`import:confirm:${token}`)
+      .setLabel(tr(interaction, 'bot.team_import.confirm'))
+      .setStyle(ButtonStyle.Success),
+    new ButtonBuilder()
+      .setCustomId(`import:cancel:${token}`)
+      .setLabel(tr(interaction, 'common.cancel'))
+      .setStyle(ButtonStyle.Secondary),
   );
 
   const [firstBlock, ...restBlocks] = blocks;
@@ -382,10 +476,21 @@ async function handleTeamImport(interaction, ctx) {
 
 async function handleTeamList(interaction) {
   const teams = await teamService.listTeams({});
-  if (!teams.length) return interaction.reply({ content: 'No active teams.', ...eph });
-  const rows = teams.map((t) => [t.team_name, t.team_id, t.game_type ?? '-']);
-  const messages = formatTableMessages(['Name', 'Code', 'Game type'], rows);
-  if (containsWideChars(rows.flat())) messages[messages.length - 1] += `\n${WIDE_NOTE}`;
+  if (!teams.length) {
+    return interaction.reply({ content: tr(interaction, 'bot.team_list.empty'), ...eph });
+  }
+  const rows = teams.map((team) => [team.team_name, team.team_id, team.game_type ?? '-']);
+  const messages = formatTableMessages(
+    [
+      tr(interaction, 'table.name'),
+      tr(interaction, 'table.code'),
+      tr(interaction, 'table.game_type'),
+    ],
+    rows,
+  );
+  if (containsWideChars(rows.flat())) {
+    messages[messages.length - 1] += `\n${wideNote(interaction)}`;
+  }
   return replyMessages(interaction, messages);
 }
 
@@ -402,8 +507,12 @@ async function handleTeamAdd(interaction) {
   const { guild } = await resolveMember(interaction, interaction.client);
   if (guild) await teamService.ensureTeamRole(guild, team, interaction.user.id);
   return interaction.editReply(
-    `Team added.\n${formatTable(
-      ['Name', 'Code', 'Game type'],
+    `${tr(interaction, 'bot.team_add.added')}\n${formatTable(
+      [
+        tr(interaction, 'table.name'),
+        tr(interaction, 'table.code'),
+        tr(interaction, 'table.game_type'),
+      ],
       [[team.team_name, team.team_id, team.game_type ?? '-']],
     )}`,
   );
@@ -415,8 +524,12 @@ async function handleTeamRemove(interaction) {
   const identifier = interaction.options.getString('team', true);
   const team = await teamService.deactivateTeam(identifier, interaction.user.id);
   return interaction.editReply(
-    `Team deactivated (historical data retained).\n${formatTable(
-      ['Name', 'Code', 'Game type'],
+    `${tr(interaction, 'bot.team_remove.removed')}\n${formatTable(
+      [
+        tr(interaction, 'table.name'),
+        tr(interaction, 'table.code'),
+        tr(interaction, 'table.game_type'),
+      ],
       [[team.team_name, team.team_id, team.game_type ?? '-']],
     )}`,
   );
@@ -429,8 +542,15 @@ async function handleTeamSync(interaction, ctx) {
   const results = await teamService.syncTeamRoles(guild, interaction.user.id);
   const errors = results.filter((r) => r.action === 'error');
   return interaction.editReply(
-    `Role sync complete: ${results.length - errors.length}/${results.length} teams synchronized.` +
-      (errors.length ? `\nErrors: ${errors.map((e) => `${e.team}`).join(', ')}` : ''),
+    tr(interaction, 'bot.team_sync.complete', {
+      synced: results.length - errors.length,
+      total: results.length,
+    }) +
+      (errors.length
+        ? `\n${tr(interaction, 'bot.team_sync.errors', {
+            errors: errors.map((e) => `${e.team}`).join(', '),
+          })}`
+        : ''),
   );
 }
 
@@ -438,17 +558,23 @@ async function handleMyTeam(interaction) {
   const player = await playerService.getPlayerByDiscordId(interaction.user.id);
   if (!player?.team) {
     return interaction.reply({
-      content: 'You have not selected a team yet. Use `/regist` or `/repick-team` to choose one.',
+      content: tr(interaction, 'bot.myteam.none'),
       ...eph,
     });
   }
   const team = player.team;
   const table = formatTable(
-    ['Team', 'Code', 'Game type'],
+    [
+      tr(interaction, 'table.team'),
+      tr(interaction, 'table.code'),
+      tr(interaction, 'table.game_type'),
+    ],
     [[team.team_name, team.team_id, team.game_type ?? '-']],
   );
-  const note = containsWideChars([team.team_name, team.game_type]) ? `\n${WIDE_NOTE}` : '';
-  return interaction.reply({ content: `Your team\n${table}${note}`, ...eph });
+  const note = containsWideChars([team.team_name, team.game_type])
+    ? `\n${wideNote(interaction)}`
+    : '';
+  return interaction.reply({ content: `${tr(interaction, 'bot.myteam.title')}\n${table}${note}`, ...eph });
 }
 
 /**
@@ -461,9 +587,7 @@ async function promptTeamSearch(interaction, ctx, { update = false, note = null 
   const minutes = Math.max(1, Math.round(config.interactionExpiration / 60000));
 
   const intro =
-    (note ? `${note}\n\n` : '') +
-    'Type your **team code (รหัสทีม)** or **team name** as a message in this chat.\n' +
-    `You have ${minutes} minute(s). Type \`cancel\` to stop.`;
+    (note ? `${note}\n\n` : '') + tr(interaction, 'bot.search.intro', { minutes });
 
   if (update) {
     await interaction.update({ content: intro, components: [] });
@@ -495,9 +619,7 @@ async function promptTeamSearch(interaction, ctx, { update = false, note = null 
     const teams = await playerService.searchActiveTeams(query);
     if (!teams.length) {
       await send({
-        content:
-          `No teams matched "${query.slice(0, 100)}". ` +
-          'Try another team code or name, or type `cancel`.',
+        content: tr(interaction, 'bot.search.not_found', { query: query.slice(0, 100) }),
       });
       return;
     }
@@ -505,22 +627,28 @@ async function promptTeamSearch(interaction, ctx, { update = false, note = null 
     collector.stop('found');
     const select = new StringSelectMenuBuilder()
       .setCustomId('team:select')
-      .setPlaceholder('Select your team')
+      .setPlaceholder(tr(interaction, 'bot.search.placeholder'))
       .addOptions(
-        teams.slice(0, 25).map((t) => ({
-          label: t.team_name.slice(0, 100),
-          description: `รหัสทีม/Code: ${t.team_id} • ประเภทเกม/Game: ${t.game_type ?? '-'}`.slice(0, 100),
-          value: t.team_id,
+        teams.slice(0, 25).map((team) => ({
+          label: team.team_name.slice(0, 100),
+          description: tr(interaction, 'bot.search.option_description', {
+            code: team.team_id,
+            game: team.game_type ?? '-',
+          }).slice(0, 100),
+          value: team.team_id,
         })),
       );
     await send({
-      content: `Found ${teams.length} team(s) matching "${query.slice(0, 100)}". Select yours:`,
+      content: tr(interaction, 'bot.search.found', {
+        count: teams.length,
+        query: query.slice(0, 100),
+      }),
       components: [
         new ActionRowBuilder().addComponents(select),
         new ActionRowBuilder().addComponents(
           new ButtonBuilder()
             .setCustomId('team:search')
-            .setLabel('Search again')
+            .setLabel(tr(interaction, 'bot.search.again'))
             .setStyle(ButtonStyle.Secondary),
         ),
       ],
@@ -529,11 +657,9 @@ async function promptTeamSearch(interaction, ctx, { update = false, note = null 
 
   collector.on('end', async (_collected, reason) => {
     if (reason === 'cancelled') {
-      await send({ content: 'Team search cancelled. Nothing was changed.' });
+      await send({ content: tr(interaction, 'bot.search.cancelled') });
     } else if (reason === 'time') {
-      await send({
-        content: 'Team search expired. Use `/repick-team` or press **Choose Team** again.',
-      });
+      await send({ content: tr(interaction, 'bot.search.expired') });
     }
   });
 }
@@ -543,7 +669,7 @@ async function promptTeamSearch(interaction, ctx, { update = false, note = null 
  */
 async function showTeamConfirmation(interaction, ctx, team, { update = false } = {}) {
   if (!team.is_active) {
-    const payload = { content: 'That team is no longer active.', components: [] };
+    const payload = { content: tr(interaction, 'bot.team_select.inactive'), components: [] };
     return update ? interaction.update(payload) : interaction.reply({ ...payload, ...eph });
   }
 
@@ -553,16 +679,19 @@ async function showTeamConfirmation(interaction, ctx, team, { update = false } =
     guildId: getGuild(interaction, ctx.client)?.id ?? null,
   });
   const existing = await playerService.getPlayerByDiscordId(interaction.user.id);
-  const selected = formatTable(
-    ['Team', 'Code', 'Game type'],
-    [[team.team_name, team.team_id, team.game_type ?? '-']],
-  );
+  const headers = () => [
+    tr(interaction, 'table.team'),
+    tr(interaction, 'table.code'),
+    tr(interaction, 'table.game_type'),
+  ];
+  const selected = formatTable(headers(), [
+    [team.team_name, team.team_id, team.game_type ?? '-'],
+  ]);
   const current = existing?.team
-    ? '\n\nCurrent team\n' +
-      formatTable(
-        ['Team', 'Code', 'Game type'],
-        [[existing.team.team_name, existing.team.team_id, existing.team.game_type ?? '-']],
-      )
+    ? `\n\n${tr(interaction, 'bot.team_select.current')}\n` +
+      formatTable(headers(), [
+        [existing.team.team_name, existing.team.team_id, existing.team.game_type ?? '-'],
+      ])
     : '';
   const wide = containsWideChars([
     team.team_name,
@@ -571,14 +700,20 @@ async function showTeamConfirmation(interaction, ctx, team, { update = false } =
     existing?.team?.game_type,
   ]);
   const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId(`team:confirm:${token}`).setLabel('Confirm').setStyle(ButtonStyle.Success),
-    new ButtonBuilder().setCustomId(`team:cancel:${token}`).setLabel('Cancel').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId(`team:confirm:${token}`)
+      .setLabel(tr(interaction, 'common.confirm'))
+      .setStyle(ButtonStyle.Success),
+    new ButtonBuilder()
+      .setCustomId(`team:cancel:${token}`)
+      .setLabel(tr(interaction, 'common.cancel'))
+      .setStyle(ButtonStyle.Secondary),
   );
   const payload = {
     content:
-      `You selected\n${selected}${current}\n\n` +
-      'Are you sure this is your team? (Expires in 5 minutes)' +
-      (wide ? `\n${WIDE_NOTE}` : ''),
+      `${tr(interaction, 'bot.team_select.selected')}\n${selected}${current}\n\n` +
+      tr(interaction, 'bot.team_select.confirm_question') +
+      (wide ? `\n${wideNote(interaction)}` : ''),
     components: [row],
   };
   return update ? interaction.update(payload) : interaction.reply({ ...payload, ...eph });
@@ -586,7 +721,7 @@ async function showTeamConfirmation(interaction, ctx, team, { update = false } =
 
 async function handleInit(interaction) {
   if (!config.devCommands) {
-    return interaction.reply({ content: 'Development commands are disabled.', ...eph });
+    return interaction.reply({ content: tr(interaction, 'bot.init.disabled'), ...eph });
   }
 
   await interaction.deferReply({ ...eph });
@@ -606,11 +741,10 @@ async function handleInit(interaction) {
       actorDiscordId: interaction.user.id,
     });
     return interaction.editReply({
-      content:
-        `Initialized <@${result.player.discord_user_id}> (**${result.player.discord_username}**) ` +
-        'to the initial player state (no team).\n' +
-        'The welcome DM is skipped because MATCH_MODULE_ONLY is enabled. ' +
-        'Use /regist or /repick-team to pick a team.',
+      content: tr(interaction, 'bot.init.module_only', {
+        user: `<@${result.player.discord_user_id}>`,
+        username: result.player.discord_username,
+      }),
       ...eph,
     });
   }
@@ -625,12 +759,10 @@ async function handleInit(interaction) {
   const dmSent = await sendWelcome(member ?? target, guild?.id);
 
   return interaction.editReply({
-    content:
-      `Initialized <@${result.player.discord_user_id}> (**${result.player.discord_username}**) ` +
-      'to the initial player state (no team).\n' +
-      (dmSent
-        ? 'The newcomer welcome DM was sent — press **Choose Team** there to pick a team.'
-        : 'Could not send the welcome DM (DMs may be closed). The target must use `/regist`.'),
+    content: tr(interaction, dmSent ? 'bot.init.dm_sent' : 'bot.init.dm_failed', {
+      user: `<@${result.player.discord_user_id}>`,
+      username: result.player.discord_username,
+    }),
   });
 }
 
@@ -638,9 +770,10 @@ async function handleRegister(interaction, ctx) {
   const existing = await playerService.getPlayerByDiscordId(interaction.user.id);
   if (existing?.team) {
     return interaction.reply({
-      content:
-        `You are already registered on **${existing.team.team_name}** ` +
-        `(${existing.team.team_id}). Use \`/repick-team\` to change teams.`,
+      content: tr(interaction, 'bot.regist.already_registered', {
+        team: existing.team.team_name,
+        code: existing.team.team_id,
+      }),
       ...eph,
     });
   }
@@ -652,7 +785,9 @@ async function handleRegister(interaction, ctx) {
   } catch (err) {
     if (err instanceof NotFoundError || err instanceof ValidationError) {
       return promptTeamSearch(interaction, ctx, {
-        note: `${err.message} Let's search again.`,
+        note: tr(interaction, 'bot.search.retry_note', {
+          error: errorMessage(interactionLocale(interaction), err),
+        }),
       });
     }
     throw err;
@@ -669,7 +804,9 @@ async function handleRepickTeam(interaction, ctx) {
   } catch (err) {
     if (err instanceof NotFoundError || err instanceof ValidationError) {
       return promptTeamSearch(interaction, ctx, {
-        note: `${err.message} Let's search again.`,
+        note: tr(interaction, 'bot.search.retry_note', {
+          error: errorMessage(interactionLocale(interaction), err),
+        }),
       });
     }
     throw err;
@@ -680,34 +817,59 @@ async function handleRepickTeam(interaction, ctx) {
 async function handleMatchList(interaction) {
   const status = interaction.options.getString('status') ?? undefined;
   const matches = await matchService.listMatches({ status });
-  if (!matches.length) return interaction.reply({ content: 'No matches found.', ...eph });
-  const rows = matches.slice(0, 50).map((m) => {
-    const r = m.results?.[0];
+  if (!matches.length) {
+    return interaction.reply({ content: tr(interaction, 'bot.match_list.empty'), ...eph });
+  }
+  const rows = matches.slice(0, 50).map((match) => {
+    const result = match.results?.[0];
     return [
-      m.team1?.team_name ?? '?',
-      r ? `${r.score1}-${r.score2}` : '-',
-      m.team2?.team_name ?? '?',
-      m.status,
+      match.team1?.team_name ?? '?',
+      result ? `${result.score1}-${result.score2}` : '-',
+      match.team2?.team_name ?? '?',
+      match.status,
     ];
   });
-  const messages = formatTableMessages(['Team 1', 'Score', 'Team 2', 'Status'], rows);
-  if (containsWideChars(rows.flat())) messages[messages.length - 1] += `\n${WIDE_NOTE}`;
+  const messages = formatTableMessages(
+    [
+      tr(interaction, 'table.team1'),
+      tr(interaction, 'table.score'),
+      tr(interaction, 'table.team2'),
+      tr(interaction, 'table.status'),
+    ],
+    rows,
+  );
+  if (containsWideChars(rows.flat())) {
+    messages[messages.length - 1] += `\n${wideNote(interaction)}`;
+  }
   return replyMessages(interaction, messages);
 }
 
 async function handleMatchInfo(interaction, ctx) {
   let identifier = interaction.options.getString('match');
   if (!identifier && interaction.channel?.isThread?.()) identifier = interaction.channel.id;
-  if (!identifier) return interaction.reply({ content: 'Provide a match ID or run this inside a match thread.', ...eph });
+  if (!identifier) {
+    return interaction.reply({ content: tr(interaction, 'bot.match_info.missing'), ...eph });
+  }
   const match = await matchService.getMatch(identifier);
   const result = match.results?.[0];
   const embed = new EmbedBuilder()
     .setTitle(`${match.team1?.team_name} vs ${match.team2?.team_name}`)
     .addFields(
-      { name: 'Match ID', value: match.id, inline: true },
-      { name: 'Status', value: match.status, inline: true },
-      { name: 'Thread', value: match.discord_thread_id ? `<#${match.discord_thread_id}>` : 'n/a', inline: true },
-      { name: 'Result', value: result ? `${result.score1}-${result.score2} (${result.status})` : 'No result yet' },
+      { name: tr(interaction, 'bot.match_info.match_id'), value: match.id, inline: true },
+      { name: tr(interaction, 'bot.match_info.status'), value: match.status, inline: true },
+      {
+        name: tr(interaction, 'bot.match_info.thread'),
+        value: match.discord_thread_id
+          ? `<#${match.discord_thread_id}>`
+          : tr(interaction, 'bot.match_info.not_available'),
+        inline: true,
+      },
+      {
+        name: tr(interaction, 'bot.match_info.result'),
+        value: result
+          ? `${result.score1}-${result.score2} (${result.status})`
+          : tr(interaction, 'bot.match_info.no_result'),
+      },
     );
   return interaction.reply({ embeds: [embed], ...eph });
 }
@@ -717,30 +879,42 @@ async function handleMatchClose(interaction, ctx) {
   await interaction.deferReply({ ...eph });
   let identifier = interaction.options.getString('match');
   if (!identifier && interaction.channel?.isThread?.()) identifier = interaction.channel.id;
-  if (!identifier) return interaction.editReply('Provide a match ID or run this inside a match thread.');
+  if (!identifier) return interaction.editReply(tr(interaction, 'bot.match_info.missing'));
   const guild = getGuild(interaction, ctx.client);
   const match = await matchService.closeMatch(identifier, interaction.user.id, { guild });
   const channel = guild?.channels.cache.get(config.discord.matchChannelId);
   if (channel) {
-    await channel
-      .send(`Match \`${match.id}\` closed. Its private thread has been removed.`)
-      .catch(() => {});
+    await channel.send(tr(interaction, 'bot.match_close.announcement', { match: match.id })).catch(() => {});
   }
   // The thread is deleted by closeMatch, so this reply may fail if it was sent there.
-  return interaction.editReply(`Match ${match.id} closed and thread removed.`).catch(() => {});
+  return interaction
+    .editReply(tr(interaction, 'bot.match_close.done', { match: match.id }))
+    .catch(() => {});
 }
 
 async function handleResultStatus(interaction) {
   await interaction.deferReply({ ...eph });
-  if (!interaction.channel?.isThread?.()) return interaction.editReply('Use this inside a match thread.');
+  if (!interaction.channel?.isThread?.()) {
+    return interaction.editReply(tr(interaction, 'bot.result.outside_thread'));
+  }
   const match = await matchService.findMatchByThreadId(interaction.channel.id);
-  if (!match) return interaction.editReply('This thread is not a match thread.');
+  if (!match) return interaction.editReply(tr(interaction, 'bot.result.not_match_thread'));
   const result = match.results?.[0];
-  if (!result) return interaction.editReply('No result submitted yet.');
-  const detail = await resultService.describeConfirmationStatus(result.id);
+  if (!result) return interaction.editReply(tr(interaction, 'bot.result.no_result'));
+  const detail = await resultService.describeConfirmationStatus(
+    result.id,
+    config.resultConfirmationPolicy,
+    interactionLocale(interaction),
+  );
   return interaction.editReply(
-    `**${match.team1.team_name} ${result.score1}-${result.score2} ${match.team2.team_name}**\n` +
-      `Status: **${result.status}**\n${detail}`,
+    tr(interaction, 'bot.result.status_summary', {
+      team1: match.team1.team_name,
+      score1: result.score1,
+      score2: result.score2,
+      team2: match.team2.team_name,
+      status: result.status,
+      detail,
+    }),
   );
 }
 
@@ -748,25 +922,36 @@ async function handleResultReview(interaction) {
   if (adminOnly(interaction)) return;
   await interaction.deferReply({ ...eph });
   const results = await resultService.listResults({ status: 'pending' });
-  if (!results.length) return interaction.editReply('No pending results.');
-  const embed = new EmbedBuilder().setTitle('Pending results').setColor(0xf1c40f);
+  if (!results.length) return interaction.editReply(tr(interaction, 'bot.result.review_empty'));
+  const embed = new EmbedBuilder()
+    .setTitle(tr(interaction, 'bot.result.review_title'))
+    .setColor(0xf1c40f);
   const rows = [];
-  for (const r of results.slice(0, 5)) {
+  for (const result of results.slice(0, 5)) {
     embed.addFields({
-      name: `${r.match?.team1?.team_name} ${r.score1}-${r.score2} ${r.match?.team2?.team_name}`,
-      value: `Result \`${r.id}\`\nSubmitted by <@${r.submitted_by}>\nMatch \`${r.match_id}\``,
+      name: `${result.match?.team1?.team_name} ${result.score1}-${result.score2} ${result.match?.team2?.team_name}`,
+      value: tr(interaction, 'bot.result.review_field', {
+        id: result.id,
+        user: `<@${result.submitted_by}>`,
+        match: result.match_id,
+      }),
     });
   }
-  for (const r of results.slice(0, 5)) {
+  for (const result of results.slice(0, 5)) {
     rows.push(
       new ActionRowBuilder().addComponents(
         new ButtonBuilder()
-          .setCustomId(`result:adminconfirm:${r.id}`)
-          .setLabel(`Finalize ${r.match?.team1?.team_name} vs ${r.match?.team2?.team_name}`.slice(0, 80))
+          .setCustomId(`result:adminconfirm:${result.id}`)
+          .setLabel(
+            tr(interaction, 'bot.result.finalize_button', {
+              team1: result.match?.team1?.team_name,
+              team2: result.match?.team2?.team_name,
+            }).slice(0, 80),
+          )
           .setStyle(ButtonStyle.Success),
         new ButtonBuilder()
-          .setCustomId(`result:admincancel:${r.id}`)
-          .setLabel('Cancel')
+          .setCustomId(`result:admincancel:${result.id}`)
+          .setLabel(tr(interaction, 'common.cancel'))
           .setStyle(ButtonStyle.Danger),
       ),
     );
@@ -780,24 +965,36 @@ async function handleResultEdit(interaction) {
   const resultId = interaction.options.getString('result_id', true);
   const score1 = interaction.options.getInteger('score1', true);
   const score2 = interaction.options.getInteger('score2', true);
-  const updated = await resultService.editResult({ resultId, score1, score2, actorDiscordId: interaction.user.id });
-  return interaction.editReply(`Result updated to ${updated.score1}-${updated.score2}.`);
+  const updated = await resultService.editResult({
+    resultId,
+    score1,
+    score2,
+    actorDiscordId: interaction.user.id,
+  });
+  return interaction.editReply(
+    tr(interaction, 'bot.result.edit_updated', {
+      score1: updated.score1,
+      score2: updated.score2,
+    }),
+  );
 }
 
 async function handleResultCancel(interaction) {
   await interaction.deferReply({ ...eph });
-  if (!interaction.channel?.isThread?.()) return interaction.editReply('Use this inside a match thread.');
+  if (!interaction.channel?.isThread?.()) {
+    return interaction.editReply(tr(interaction, 'bot.result.outside_thread'));
+  }
   const match = await matchService.findMatchByThreadId(interaction.channel.id);
-  if (!match) return interaction.editReply('This thread is not a match thread.');
+  if (!match) return interaction.editReply(tr(interaction, 'bot.result.not_match_thread'));
   const result = match.results?.[0];
-  if (!result) return interaction.editReply('No result to cancel.');
+  if (!result) return interaction.editReply(tr(interaction, 'bot.result.nothing_to_cancel'));
   await resultService.cancelResult({
     resultId: result.id,
     actorDiscordId: interaction.user.id,
     isAdmin: isAdmin(interaction),
     requesterId: interaction.user.id,
   });
-  return interaction.editReply('Result cancelled.');
+  return interaction.editReply(tr(interaction, 'bot.result.cancelled'));
 }
 
 /* ------------------------------ select menus ----------------------------- */
@@ -824,30 +1021,39 @@ async function handleButton(interaction, ctx) {
     if (token) cancelPendingSelection(token, interaction.user.id);
     return promptTeamSearch(interaction, ctx, {
       update: true,
-      note: 'Starting a new search — the previous results were discarded.',
+      note: tr(interaction, 'bot.search.new_search_note'),
     });
   }
 
   if (scope === 'team' && action === 'cancel') {
     cancelPendingSelection(token, interaction.user.id);
-    return interaction.update({ content: 'Team selection cancelled. Nothing was changed.', components: [] });
+    return interaction.update({
+      content: tr(interaction, 'bot.team_select.cancel_notice'),
+      components: [],
+    });
   }
 
   if (scope === 'team' && action === 'confirm') {
     const entry = consumePendingSelection(token, interaction.user.id);
     if (!entry) {
-      return interaction.update({ content: 'This confirmation has expired or already been used.', components: [] });
+      return interaction.update({
+        content: tr(interaction, 'bot.team_select.expired'),
+        components: [],
+      });
     }
     if (entry.forbidden) {
-      return interaction.reply({ content: 'This confirmation belongs to another user.', ...eph });
+      return interaction.reply({ content: tr(interaction, 'bot.team_select.other_user'), ...eph });
     }
     if (entry.duplicate) {
-      return interaction.reply({ content: 'This confirmation was already processed.', ...eph });
+      return interaction.reply({ content: tr(interaction, 'bot.team_select.already_processed'), ...eph });
     }
     await interaction.deferUpdate();
     const team = await teamService.getTeam(entry.teamId);
     if (!team.is_active) {
-      return interaction.editReply({ content: 'That team is no longer active. Nothing was changed.', components: [] });
+      return interaction.editReply({
+        content: tr(interaction, 'bot.team_select.inactive_no_change'),
+        components: [],
+      });
     }
     const { guild, member } = await resolveMember(interaction, ctx.client);
     const result = await playerService.assignTeam({
@@ -868,35 +1074,52 @@ async function handleButton(interaction, ctx) {
       logger.warn({ err }, 'Thread access sync failed');
     }
     return interaction.editReply({
-      content: `You are now on team **${team.team_name}**.${result.warning ? `\n⚠️ ${result.warning}` : ''}`,
+      content: tr(interaction, 'bot.team_select.success', {
+        team: team.team_name,
+        warning: result.warning ? `\n⚠️ ${result.warning}` : '',
+      }),
       components: [],
     });
   }
 
   if (scope === 'import' && action === 'cancel') {
     cancelPendingImport(token, interaction.user.id);
-    return interaction.update({ content: 'Import cancelled. No changes were made.', embeds: [], components: [] });
+    return interaction.update({
+      content: tr(interaction, 'bot.team_import.cancelled'),
+      embeds: [],
+      components: [],
+    });
   }
 
   if (scope === 'import' && action === 'confirm') {
     if (!isAdmin(interaction)) {
-      return interaction.reply({ content: 'You do not have permission to confirm this import.', ...eph });
+      return interaction.reply({ content: tr(interaction, 'bot.team_import.not_allowed'), ...eph });
     }
     const entry = consumePendingImport(token, interaction.user.id);
     if (!entry) {
-      return interaction.update({ content: 'This import confirmation has expired.', embeds: [], components: [] });
+      return interaction.update({
+        content: tr(interaction, 'bot.team_import.expired'),
+        embeds: [],
+        components: [],
+      });
     }
-    if (entry.forbidden) return interaction.reply({ content: 'Only the importer can confirm.', ...eph });
-    if (entry.duplicate) return interaction.reply({ content: 'Already processed.', ...eph });
+    if (entry.forbidden) {
+      return interaction.reply({ content: tr(interaction, 'bot.team_import.only_importer'), ...eph });
+    }
+    if (entry.duplicate) {
+      return interaction.reply({ content: tr(interaction, 'bot.team_import.already_processed'), ...eph });
+    }
 
     await interaction.deferUpdate();
     const applied = await teamService.applyImport(entry.rows, { actorDiscordId: interaction.user.id });
     const guild = getGuild(interaction, ctx.client);
     if (guild) await teamService.syncTeamRoles(guild, interaction.user.id);
     return interaction.editReply({
-      content:
-        `Import complete. Created ${applied.created.length}, updated ${applied.updated.length}, ` +
-        `deactivated ${applied.deactivated.length}. Discord roles synchronized.`,
+      content: tr(interaction, 'bot.team_import.complete', {
+        created: applied.created.length,
+        updated: applied.updated.length,
+        deactivated: applied.deactivated.length,
+      }),
       embeds: [],
       components: [],
     });
@@ -908,17 +1131,19 @@ async function handleButton(interaction, ctx) {
     const updated = await resultService.confirmResult({ resultId, discordUserId: interaction.user.id });
     if (updated.status === 'final') {
       await announceFinalResult(interaction, ctx, resultId);
-      return interaction.editReply(
-        'Confirmation recorded. The result is now final and has been announced.',
-      );
+      return interaction.editReply(tr(interaction, 'bot.result.confirmed_final'));
     }
-    const detail = await resultService.describeConfirmationStatus(resultId);
-    return interaction.editReply(`Confirmation recorded. ${detail}`);
+    const detail = await resultService.describeConfirmationStatus(
+      resultId,
+      config.resultConfirmationPolicy,
+      interactionLocale(interaction),
+    );
+    return interaction.editReply(tr(interaction, 'bot.result.confirmed_pending', { detail }));
   }
 
   if (scope === 'result' && action === 'adminconfirm') {
     if (!isStaff(interaction)) {
-      return interaction.reply({ content: 'You do not have permission to finalize results.', ...eph });
+      return interaction.reply({ content: tr(interaction, 'bot.result.not_allowed_finalize'), ...eph });
     }
     await interaction.deferUpdate();
     const updated = await resultService.adminConfirmResult({
@@ -928,13 +1153,13 @@ async function handleButton(interaction, ctx) {
     if (updated.status === 'final') {
       await announceFinalResult(interaction, ctx, token);
       return interaction.editReply({
-        content: `Result ${token} finalized and announced.`,
+        content: tr(interaction, 'bot.result.finalized', { id: token }),
         embeds: [],
         components: [],
       });
     }
     return interaction.editReply({
-      content: `Result ${token} still awaits both-team confirmation.`,
+      content: tr(interaction, 'bot.result.still_pending', { id: token }),
       embeds: [],
       components: [],
     });
@@ -942,7 +1167,7 @@ async function handleButton(interaction, ctx) {
 
   if (scope === 'result' && action === 'admincancel') {
     if (!isStaff(interaction)) {
-      return interaction.reply({ content: 'You do not have permission to cancel results.', ...eph });
+      return interaction.reply({ content: tr(interaction, 'bot.result.not_allowed_cancel'), ...eph });
     }
     await interaction.deferUpdate();
     await resultService.cancelResult({
@@ -951,7 +1176,11 @@ async function handleButton(interaction, ctx) {
       isAdmin: true,
       requesterId: interaction.user.id,
     });
-    return interaction.editReply({ content: `Result ${token} cancelled.`, embeds: [], components: [] });
+    return interaction.editReply({
+      content: tr(interaction, 'bot.result.admin_cancelled', { id: token }),
+      embeds: [],
+      components: [],
+    });
   }
 }
 

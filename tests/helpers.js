@@ -8,6 +8,7 @@ export async function resetDb() {
     prisma.match_module_records.deleteMany(),
     prisma.players.deleteMany(),
     prisma.player_selections.deleteMany(),
+    prisma.user_settings.deleteMany(),
     prisma.teams.deleteMany(),
     prisma.audit_logs.deleteMany(),
   ]);

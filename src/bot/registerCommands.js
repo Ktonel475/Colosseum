@@ -74,6 +74,20 @@ const allCommandDefinitions = [
     .setDescription('Show your current team')
     .setDMPermission(false),
   new SlashCommandBuilder()
+    .setName('language')
+    .setDescription('Choose the language the bot uses for you (English / ไทย)')
+    .setDMPermission(false)
+    .addStringOption((o) =>
+      o
+        .setName('language')
+        .setDescription('Your preferred language')
+        .setRequired(true)
+        .addChoices(
+          { name: 'English', value: 'en' },
+          { name: 'ไทย (Thai)', value: 'th' },
+        ),
+    ),
+  new SlashCommandBuilder()
     .setName('regist')
     .setDescription('Register as a player and pick your team')
     .setDMPermission(false)

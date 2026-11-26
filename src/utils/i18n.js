@@ -57,6 +57,38 @@ export function resolveLocale(locale) {
   return String(locale ?? '').toLowerCase().startsWith('th') ? 'th' : FALLBACK_LOCALE;
 }
 
+/**
+ * Normalize an explicit language choice. Unlike {@link resolveLocale}, an
+ * unsupported value returns `null` so callers can reject it instead of silently
+ * falling back to English.
+ *
+ * @param {string} [locale]
+ * @returns {'en' | 'th' | null}
+ */
+export function normalizeLocale(locale) {
+  const value = String(locale ?? '').toLowerCase();
+  if (value === 'en' || value.startsWith('en-')) return 'en';
+  if (value === 'th' || value.startsWith('th-')) return 'th';
+  return null;
+}
+
+/**
+ * Locale for an interaction. The host sets `interaction.userLocale` after
+ * reading the stored user preference; when it is absent (e.g. the match module
+ * used standalone) we fall back to the Discord client locale.
+ *
+ * @param {object} interaction
+ * @returns {'en' | 'th'}
+ */
+export function interactionLocale(interaction) {
+  return resolveLocale(interaction?.userLocale ?? interaction?.locale);
+}
+
+/** Translate using an interaction's resolved user locale. */
+export function tUser(interaction, key, params) {
+  return t(interactionLocale(interaction), key, params);
+}
+
 function interpolate(template, params) {
   if (!params) return template;
   return template.replace(/\{(\w+)\}/g, (match, key) =>
@@ -93,9 +125,9 @@ export function createTranslator(namespace) {
   return (locale, key, params) => t(locale, `${prefix}${key}`, params);
 }
 
-/** Interaction helper that reads `interaction.locale`. */
+/** Interaction helper that prefers the stored user locale, then `interaction.locale`. */
 export function tInteraction(interaction, key, params) {
-  return t(interaction?.locale, key, params);
+  return tUser(interaction, key, params);
 }
 
 /** Namespaced translator for the match module. */
@@ -108,8 +140,11 @@ export default {
   t,
   tMatch,
   tInteraction,
+  tUser,
+  interactionLocale,
   createTranslator,
   resolveLocale,
+  normalizeLocale,
   preloadLocales,
   dictionaries,
 };

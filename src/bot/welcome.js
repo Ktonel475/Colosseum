@@ -1,6 +1,8 @@
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } from 'discord.js';
 import logger from '../utils/logger.js';
 import * as playerService from '../services/playerService.js';
+import { getUserLocale } from '../services/languageService.js';
+import { t } from '../utils/i18n.js';
 
 /**
  * Send the newcomer DM that starts team selection.
@@ -11,9 +13,12 @@ import * as playerService from '../services/playerService.js';
  *
  * @param {object} target discord.js GuildMember or User (`id`, `send`)
  * @param {string} [guildId] guild used to scope the selection session
+ * @param {object} [options]
+ * @param {string} [options.locale] explicit locale (defaults to the saved user
+ *   preference, then the guild locale, then English)
  * @returns {Promise<boolean>} true when the DM was delivered
  */
-export async function sendWelcome(target, guildId) {
+export async function sendWelcome(target, guildId, { locale } = {}) {
   const userId = target.id;
   const username = target.user?.username ?? target.username ?? 'Unknown';
   const sessionGuildId = guildId ?? target.guild?.id ?? null;
@@ -25,19 +30,20 @@ export async function sendWelcome(target, guildId) {
       guildId: sessionGuildId,
     });
 
+    const resolvedLocale =
+      locale ??
+      (await getUserLocale(userId, target.guild?.preferredLocale).catch(() => null)) ??
+      'en';
+
     const embed = new EmbedBuilder()
-      .setTitle('Welcome to the competition server!')
-      .setDescription(
-        'Please select the team you belong to.\n\n' +
-          'Press the button below, then type your **team code (รหัสทีม)** or **team name** as a message. ' +
-          'Your selection is only saved after you confirm it.',
-      )
+      .setTitle(t(resolvedLocale, 'welcome.title'))
+      .setDescription(t(resolvedLocale, 'welcome.description'))
       .setColor(0x5865f2);
 
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder()
         .setCustomId('team:choose')
-        .setLabel('Choose Team')
+        .setLabel(t(resolvedLocale, 'welcome.choose_team'))
         .setStyle(ButtonStyle.Primary),
     );
 
