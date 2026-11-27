@@ -239,6 +239,39 @@ describe('match service', () => {
     expect(thread.name).toBe('Alice พบ Bob');
   });
 
+  test('includes a copyable result submission template in the intro', async () => {
+    const { thread } = await createMatch({
+      roundChannel: makeRoundChannel(),
+      team1: { id: 'u1', name: 'Alice' },
+      team2: { id: 'u2', name: 'Bob' },
+      locale: 'th-TH',
+      repository: new MemoryMatchRepository(),
+    });
+
+    const intro = thread.messages[0];
+    const copyPart = intro.split('```')[1];
+    expect(copyPart).toContain('แนะนำการส่งผลใน เธรด');
+    expect(copyPart).toContain('คู่แข่ง: Alice vs Bob');
+    expect(copyPart).toContain('ทีมที่ชนะ:');
+    expect(copyPart).toContain('ทีมที่แพ้:');
+    expect(copyPart).toContain('สกอร์:');
+    expect(copyPart).toContain('พร้อมแนบรูปสกรีนช็อตหน้าจบเกม 2 รูป');
+  });
+
+  test('pings the admin role in the intro when one is configured', async () => {
+    const adminRoleId = '123456789012345678';
+    const { thread } = await createMatch({
+      roundChannel: makeRoundChannel(),
+      team1: { id: 'u1', name: 'Alice' },
+      team2: { id: 'u2', name: 'Bob' },
+      locale: 'en',
+      repository: new MemoryMatchRepository(),
+      adminRoleId,
+    });
+
+    expect(thread.messages[0]).toContain(`<@&${adminRoleId}>`);
+  });
+
   test('rejects a match against the same user id', async () => {
     await expect(
       createMatch({

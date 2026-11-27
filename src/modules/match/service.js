@@ -73,6 +73,14 @@ function rolePing(team) {
 }
 
 /**
+ * Build the optional admin-role ping for the intro message. Returns an empty
+ * string when no valid admin role is configured, so the template stays clean.
+ */
+function adminRolePing(adminRoleId) {
+  return isSnowflake(adminRoleId) ? ` <@&${adminRoleId}>` : "";
+}
+
+/**
  * Turn a stored team role id (or name) into a pingable team ref.
  * `team` can be `{ name, roleId? | discordRoleId? }` or a plain string
  * (treated as a name). Throws `team_role_not_found` if `requireRole` is true
@@ -134,6 +142,7 @@ export async function createMatch({
   team2,
   locale,
   repository,
+  adminRoleId = null,
 }) {
   if (!team1?.id || !team2?.id) throw new MatchModuleError("missing_team");
   if (team1.id === team2.id) throw new MatchModuleError("self_match_error");
@@ -148,6 +157,7 @@ export async function createMatch({
   // Resolve pings before creating the thread.
   const team1Ping = rolePing(team1);
   const team2Ping = rolePing(team2);
+  const adminPing = adminRolePing(adminRoleId);
 
   let thread;
   try {
@@ -162,8 +172,13 @@ export async function createMatch({
       t(locale, "thread_intro", {
         team1Ping,
         team2Ping,
+        adminPing,
         team1: team1.name,
         team2: team2.name,
+        resultTemplate: t(locale, "result_submission_template", {
+          team1: team1.name,
+          team2: team2.name,
+        }),
       }),
     );
   } catch (err) {
@@ -195,6 +210,7 @@ export async function createBulkMatches({
   repository,
   guild = null,
   requireRole = false,
+  adminRoleId = null,
 }) {
   const results = [];
   for (const pair of pairs) {
@@ -210,6 +226,7 @@ export async function createBulkMatches({
         team2,
         locale,
         repository,
+        adminRoleId,
       });
       results.push({ ok: true, pair, ...created });
     } catch (err) {

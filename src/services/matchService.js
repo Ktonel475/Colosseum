@@ -118,10 +118,17 @@ export async function createMatch({
   try {
     const ping = (team) =>
       team.discord_role_id ? `<@&${team.discord_role_id}>` : `**${team.team_name}**`;
+    const adminRoleId = adminRoleIds.find(Boolean);
+    const adminPing = adminRoleId ? ` <@&${adminRoleId}>` : '';
     await thread.send(
       t(locale, 'match_legacy_thread_intro', {
         team1Ping: ping(team1),
         team2Ping: ping(team2),
+        adminPing,
+        resultTemplate: t(locale, 'match.result_submission_template', {
+          team1: team1.team_name,
+          team2: team2.team_name,
+        }),
         team1: team1.team_name,
         team1Id: team1.team_id,
         team2: team2.team_name,

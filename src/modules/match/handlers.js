@@ -163,6 +163,7 @@ async function handleMatchCreate(interaction, repository = defaultRepository) {
       team2: pingedTeam2,
       locale,
       repository,
+      adminRoleId: config.discord.adminRoleId,
     });
     return interaction.editReply(
       t(locale, 'match_created_success', {
@@ -324,6 +325,7 @@ async function handleBulkComponent(interaction, sub, token) {
       repository: defaultRepository,
       guild: interactionGuild(interaction),
       requireRole: session.requireRole,
+      adminRoleId: config.discord.adminRoleId,
     });
     deleteBulkSession(token);
     return interaction.editReply({

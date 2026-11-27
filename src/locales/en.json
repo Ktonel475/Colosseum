@@ -7,7 +7,8 @@
   "match.no_teams": "No active teams are available. Import or add teams first.",
   "match.round_channel_required": "Use this command in a round channel that supports threads.",
   "match.thread_name_template": "{team1} vs {team2}",
-  "match.thread_intro": "{team1Ping} {team2Ping}\n\n**Match created**\n• **Team 1:** {team1}\n• **Team 2:** {team2}",
+  "match.thread_intro": "{team1Ping} {team2Ping}{adminPing}\n\n**Match created**\n• **Team 1:** {team1}\n• **Team 2:** {team2}\n\n{resultTemplate}",
+  "match.result_submission_template": "```\nResult submission guide\nMatchup: {team1} vs {team2}\nWinning team: <winning team>\nLosing team: <losing team>\nScore: <score, e.g. 2-0>\n(Attach 2 end-of-game screenshots)\n```",
   "match.match_created_success": "Match created: {team1} vs {team2} → {thread}",
   "match.match_create_failed": "Could not create the match thread: {error}",
   "match.bulk_panel_title": "Bulk match creation",
@@ -202,5 +203,5 @@
   "match_legacy": {
     "thread_intro": "${team1Ping} ${team2Ping}\n\n**Match created**\n• **Team 1:** {team1} ({team1Id})\n• **Team 2:** {team2} ({team2Id})\n\nSubmit the score from this thread with:\n`/result score1:<Team 1 score> score2:<Team 2 score>`\n\nA registered player from each team must then confirm the submitted result. Only participants and staff can see this thread."
   },
-  "match_legacy_thread_intro": "${team1Ping} ${team2Ping}\n\n**Match created**\n• **Team 1:** {team1} ({team1Id})\n• **Team 2:** {team2} ({team2Id})\n\nSubmit the score from this thread with:\n`/result score1:<Team 1 score> score2:<Team 2 score>`\n\nA registered player from each team must then confirm the submitted result. Only participants and staff can see this thread."
+  "match_legacy_thread_intro": "${team1Ping} ${team2Ping}{adminPing}\n\n**Match created**\n• **Team 1:** {team1} ({team1Id})\n• **Team 2:** {team2} ({team2Id})\n\nSubmit the score from this thread with:\n`/result score1:<Team 1 score> score2:<Team 2 score>`\n\nA registered player from each team must then confirm the submitted result. Only participants and staff can see this thread.\n\n{resultTemplate}"
 }

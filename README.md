@@ -79,8 +79,8 @@ Three capabilities are implemented:
   are selected by **team name or team code** (`team_id`) with autocomplete. By
   default (`require_role:true`) each team must have a matching Discord role, and
   the intro message pings both destination roles with a real `<@&roleId>`
-  mention. Pass `require_role:false` to allow a plain-name intro when a role is
-  missing. The thread name comes from the locale template (`{team1} vs {team2}`
+  mention and also pings the configured `ADMINISTRATOR_ROLE_ID`. Pass
+  `require_role:false` to allow a plain-name intro when a role is missing. The thread name comes from the locale template (`{team1} vs {team2}`
   in English, `{team1} พบ {team2}` in Thai).
 - `/match-create-bulk [require_role]` opens an ephemeral panel with two team
   pickers. Add as many pairings as needed, then **Create matches** to create all
@@ -312,7 +312,7 @@ alone are never trusted.
 | `/repick-team [teamname]` | Everyone | Change team by name/code, or run without the option for message search → confirm |
 | `/language language` | Everyone | Choose the bot language: English or Thai. Saved per Discord user |
 | `/init target:@user` | Dev only | Reset the selected user to the initial player state (no team) and resend the welcome DM; enabled by `ENABLE_DEV_COMMANDS` |
-| `/match-create [channel] team1 team2 [require_role]` | Admin role | Create one private match thread in the selected round channel, pinging both team roles (defaults to the current channel; autocomplete for team name/code) |
+| `/match-create [channel] team1 team2 [require_role]` | Admin role | Create one private match thread in the selected round channel, pinging both team roles and the admin role (defaults to the current channel; autocomplete for team name/code) |
 | `/match-create-bulk [require_role]` | Admin role | Assemble N pairings in a panel and create all threads, pinging each team role |
 | `/match-list [status]` | Everyone | List matches (legacy team-code subsystem) |
 | `/match-info [match]` | Everyone | Match details (or current thread) |

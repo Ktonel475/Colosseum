@@ -7,7 +7,8 @@
   "match.no_teams": "ยังไม่มีทีมที่เปิดใช้งาน กรุณานำเข้าหรือเพิ่มทีมก่อน",
   "match.round_channel_required": "กรุณาใช้คำสั่งนี้ในช่องรอบแข่งขันที่รองรับการสร้างเธรด",
   "match.thread_name_template": "{team1} พบ {team2}",
-  "match.thread_intro": "{team1Ping} {team2Ping}\n\n**สร้างแมตช์แล้ว**\n• **ทีม 1:** {team1}\n• **ทีม 2:** {team2}",
+  "match.thread_intro": "{team1Ping} {team2Ping}{adminPing}\n\n**สร้างแมตช์แล้ว**\n• **ทีม 1:** {team1}\n• **ทีม 2:** {team2}\n\n{resultTemplate}",
+  "match.result_submission_template": "```\nแนะนำการส่งผลใน เธรด\nคู่แข่ง: {team1} vs {team2}\nทีมที่ชนะ: <ชื่อทีมที่ชนะ>\nทีมที่แพ้: <ชื่อทีมที่แพ้>\nสกอร์: <สกอร์ เช่น 2-0>\n(พร้อมแนบรูปสกรีนช็อตหน้าจบเกม 2 รูป)\n```",
   "match.match_created_success": "สร้างแมตช์แล้ว: {team1} พบ {team2} → {thread}",
   "match.match_create_failed": "ไม่สามารถสร้างเธรดแมตช์ได้: {error}",
   "match.bulk_panel_title": "สร้างแมตช์หลายคู่",
@@ -202,5 +203,5 @@
   "match_legacy": {
     "thread_intro": "${team1Ping} ${team2Ping}\n\n**สร้างแมตช์แล้ว**\n• **ทีม 1:** {team1} ({team1Id})\n• **ทีม 2:** {team2} ({team2Id})\n\nส่งคะแนนจากเธรดนี้โดยใช้:\n`/result score1:<คะแนนทีม 1> score2:<คะแนนทีม 2>`\n\nผู้เล่นที่ลงทะเบียนจากแต่ละทีมต้องยืนยันผลที่ส่งมา ผู้เข้าร่วมและทีมงานเท่านั้นจึงจะเห็นเธรดนี้"
   },
-  "match_legacy_thread_intro": "${team1Ping} ${team2Ping}\n\n**สร้างแมตช์แล้ว**\n• **ทีม 1:** {team1} ({team1Id})\n• **ทีม 2:** {team2} ({team2Id})\n\nส่งคะแนนจากเธรดนี้โดยใช้:\n`/result score1:<คะแนนทีม 1> score2:<คะแนนทีม 2>`\n\nผู้เล่นที่ลงทะเบียนจากแต่ละทีมต้องยืนยันผลที่ส่งมา ผู้เข้าร่วมและทีมงานเท่านั้นจึงจะเห็นเธรดนี้"
+  "match_legacy_thread_intro": "${team1Ping} ${team2Ping}{adminPing}\n\n**สร้างแมตช์แล้ว**\n• **ทีม 1:** {team1} ({team1Id})\n• **ทีม 2:** {team2} ({team2Id})\n\nส่งคะแนนจากเธรดนี้โดยใช้:\n`/result score1:<คะแนนทีม 1> score2:<คะแนนทีม 2>`\n\nผู้เล่นที่ลงทะเบียนจากแต่ละทีมต้องยืนยันผลที่ส่งมา ผู้เข้าร่วมและทีมงานเท่านั้นจึงจะเห็นเธรดนี้\n\n{resultTemplate}"
 }
